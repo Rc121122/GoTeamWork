@@ -1,17 +1,21 @@
 # GoTeamWork
-go final project
+Collaborative clipboard and chat application with real-time synchronization
 
 ## 📝 Description
-GoTeamWork is a collaborative clipboard and chat application that allows seamless data sharing across devices. It supports two modes:
-- **LAN Mode**: Direct peer-to-peer communication on local networks
-- **Central Mode**: Server-based synchronization for remote devices
+GoTeamWork is a collaborative clipboard and chat application that allows seamless data sharing across devices. It supports two operational modes:
+
+- **Host Mode**: Acts as a central server providing REST API for user/room management
+- **Client Mode**: Connects to the host server with username authentication and waiting lobby
 
 ## 🚀 Features
-- 📋 Real-time clipboard synchronization
-- 💬 Group chat functionality
-- 🔄 Automatic peer discovery (LAN mode)
+- 📋 Real-time clipboard synchronization (Host mode)
+- 💬 Group chat functionality (Host mode)
 - 🖥️ Cross-platform GUI using Wails
-- 🔒 Secure data transmission
+- 🌐 REST API for central server communication
+- 👥 User management with unique username validation
+- 🏠 Room-based collaboration with automatic lifecycle management
+- 🔄 Real-time user list updates (Client mode)
+- 🎯 Invitation system for room joining
 
 ## 📦 Prerequisites
 
@@ -73,24 +77,65 @@ go mod download
 go mod verify
 ```
 
-### 3. Initialize Wails Project (if building UI)
+### 3. Install Frontend Dependencies
 ```bash
-# Check Wails installation
+# Install Node.js dependencies for the frontend
+cd frontend
+npm install
+cd ..
+```
+
+### 4. Build the Application
+```bash
+# Check Wails installation and system requirements
 wails doctor
 
-# Build the application
+# Build the application with frontend
 wails build
-
-# Or run in development mode with hot reload
-wails dev
 ```
 
 ## 🏃 Running the Application
+
+### Host Mode (Central Server)
+Run the application as a central server that provides REST API and manages users/rooms:
+
+```bash
+# Production build
+./build/bin/GOproject.app/Contents/MacOS/GOproject --mode host
+
+# Development mode (with hot reload)
+wails dev --mode host
+```
+
+**Host Mode Features:**
+- Starts HTTP server on port 8080
+- Provides REST API endpoints for client communication
+- Shows chat/clipboard interface for the host user
+- Manages user authentication and room creation
+
+### Client Mode (User Interface)
+Run the application as a client that connects to the host server:
+
+```bash
+# Production build
+./build/bin/GOproject.app/Contents/MacOS/GOproject --mode client
+
+# Development mode (with hot reload)
+wails dev --mode client
+```
+
+**Client Mode Features:**
+- Username input screen with validation
+- Waiting lobby showing all online users
+- Real-time user list updates (every 5 seconds)
+- Invite buttons for joining rooms
 
 ### Development Mode
 ```bash
 # Run with Wails development server (hot reload)
 wails dev
+
+# The mode can be specified via command line or UI
 ```
 
 ### Production Build
@@ -105,20 +150,28 @@ wails build -platform windows/amd64   # Windows
 wails build -platform linux/amd64     # Linux
 ```
 
-### Run Directly with Go
-```bash
-# Run without UI (terminal mode)
-go run .
-```
-
 ## 📚 Project Structure
 ```
 GoTeamWork/
-├── main.go         # Application entry point and mode selection
-├── network.go      # Network operations (LAN scan, sync, connections)
-├── UI.go           # User interface components and clipboard/chat handlers
-├── go.mod          # Go module dependencies
-└── README.md       # This file
+├── main.go              # Application entry point and mode selection
+├── app.go               # Core application logic, user/room management, HTTP API
+├── network.go           # Network operations (LAN scan, sync, connections)
+├── go.mod               # Go module dependencies
+├── go.sum               # Go module checksums
+├── wails.json           # Wails configuration
+├── frontend/            # Frontend application
+│   ├── index.html       # Main HTML page
+│   ├── package.json     # Node.js dependencies
+│   ├── src/             # Frontend source code
+│   │   ├── main.js      # Main JavaScript application
+│   │   ├── style.css    # Global styles
+│   │   └── app.css      # Component styles
+│   └── wailsjs/         # Generated Wails bindings
+├── build/               # Build output directory
+│   └── bin/             # Compiled binaries
+├── ApiMethod.md         # API methods documentation
+├── design.md            # Design documentation
+└── README.md            # This file
 ```
 
 ## 🔧 Configuration
@@ -140,17 +193,82 @@ go clean -cache
 rm -rf build/
 ```
 
+### Mode Selection Issues
+```bash
+# Always use the built binary, not the go build output
+./build/bin/GOproject.app/Contents/MacOS/GOproject --mode host
+./build/bin/GOproject.app/Contents/MacOS/GOproject --mode client
+
+# Don't use: ./GOproject --mode host (missing Wails build tags)
+```
+
 ### Network Issues
-- Ensure firewall allows the application
+- Ensure firewall allows the application (port 8080 for host mode)
 - Check network permissions on macOS/Linux
-- Verify peers are on the same subnet (LAN mode)
+- Host and clients must be able to communicate via HTTP
+
+### Frontend Issues
+```bash
+# Rebuild frontend dependencies
+cd frontend
+rm -rf node_modules package-lock.json
+npm install
+cd ..
+wails build
+```
+
+### API Connection Issues
+- Verify host is running: `curl http://localhost:8080/api/users`
+- Check that client can reach the host server
+- Ensure CORS headers are properly configured
 
 ## 📖 Documentation
+- [API Methods Documentation](ApiMethod.md) - Complete API reference
 - [Wails Documentation](https://wails.io/docs/introduction)
 - [Go Documentation](https://go.dev/doc/)
 
 ## 👨‍💻 Development
-Currently in design phase. Implementation coming soon.
+The application is fully implemented with the following components:
+
+- **Backend**: Go application with Wails framework
+- **Frontend**: HTML/CSS/JavaScript with modern UI
+- **API**: REST endpoints for client-server communication
+- **Modes**: Host mode (server) and Client mode (user interface)
+
+### API Documentation
+See [ApiMethod.md](ApiMethod.md) for detailed API method documentation.
+
+### Architecture
+- **Host Mode**: Provides central server functionality with REST API
+- **Client Mode**: User interface for joining and collaborating
+- **Room System**: Dynamic room creation and management
+- **User Management**: Authentication and online status tracking
+
+## 🔌 API Endpoints (Host Mode)
+
+When running in host mode, the application provides REST API endpoints on `http://localhost:8080`:
+
+### User Management
+- `GET /api/users` - List all users
+- `POST /api/users` - Create new user
+- `GET /api/users/{id}` - Get specific user
+
+### Room Management
+- `GET /api/rooms` - List all rooms
+- `POST /api/invite` - Invite user to room
+
+### Usage Example
+```bash
+# Start host server
+./build/bin/GOproject.app/Contents/MacOS/GOproject --mode host
+
+# In another terminal, create a user
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"name":"Alice"}' http://localhost:8080/api/users
+
+# List all users
+curl http://localhost:8080/api/users
+```
 
 ## 📄 License
 [Specify your license here]
