@@ -20,12 +20,6 @@ Tree Structure, 3 main modules:
 - mr.Chang
 - mr.Ho
 
-## Tasks for the week:
-1. Central-server implement(join/leave room, chatroom)
-2. UI(chatroom, connection status)
-3. network.go(connect to central server)
-
-
 ### Weekly goal:
 - Week 1 (11/4):
   1. Central-server implement(join/leave room, chatroom) - Assigned to mr.Lin
@@ -38,6 +32,7 @@ Tree Structure, 3 main modules:
   3. network.go(connect to central server) - Assigned to mr.Ho
      - Add connection logic to central server in network.go
      - Handle connection establishment and errors
+     - Fetch data to local db
 
 - Week 2 (11/11):
   1. Password for rooms(Central-server) - Assigned to mr.Lin
