@@ -10,12 +10,20 @@ export function GetAllRooms() {
   return window['go']['main']['App']['GetAllRooms']();
 }
 
+export function GetConnectionStatus() {
+  return window['go']['main']['App']['GetConnectionStatus']();
+}
+
 export function GetCurrentRoom() {
   return window['go']['main']['App']['GetCurrentRoom']();
 }
 
 export function GetMode() {
   return window['go']['main']['App']['GetMode']();
+}
+
+export function GetServerUsers() {
+  return window['go']['main']['App']['GetServerUsers']();
 }
 
 export function Greet(arg1) {
@@ -36,4 +44,8 @@ export function ListAllUsers() {
 
 export function StartHTTPServer(arg1) {
   return window['go']['main']['App']['StartHTTPServer'](arg1);
+}
+
+export function SyncFromServer() {
+  return window['go']['main']['App']['SyncFromServer']();
 }

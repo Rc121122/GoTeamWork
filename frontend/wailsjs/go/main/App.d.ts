@@ -6,9 +6,13 @@ export function CreateUser(arg1:string):Promise<main.User>;
 
 export function GetAllRooms():Promise<Array<main.Room>>;
 
+export function GetConnectionStatus():Promise<boolean>;
+
 export function GetCurrentRoom():Promise<main.Room>;
 
 export function GetMode():Promise<string>;
+
+export function GetServerUsers():Promise<Array<main.User>>;
 
 export function Greet(arg1:string):Promise<string>;
 
@@ -19,3 +23,5 @@ export function LeaveRoom(arg1:string):Promise<string>;
 export function ListAllUsers():Promise<Array<main.User>>;
 
 export function StartHTTPServer(arg1:string):Promise<void>;
+
+export function SyncFromServer():Promise<void>;

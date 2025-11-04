@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // User represents a user in the system
 type User struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
 	RoomID   *string `json:"roomId,omitempty"` // nil if not in any room
-	IsOnline bool   `json:"isOnline"`
+	IsOnline bool    `json:"isOnline"`
 }
 
 // Room represents a collaboration room
@@ -25,14 +26,15 @@ type Room struct {
 
 // App struct
 type App struct {
-	ctx         context.Context
-	Mode        string
-	users       map[string]*User
-	rooms       map[string]*Room
-	currentUser *User
-	currentRoom *Room
-	roomCounter int
-	mu          sync.RWMutex
+	ctx           context.Context
+	Mode          string
+	users         map[string]*User
+	rooms         map[string]*Room
+	currentUser   *User
+	currentRoom   *Room
+	roomCounter   int
+	mu            sync.RWMutex
+	networkClient *NetworkClient // For client mode
 }
 
 // NewApp creates a new App application struct
@@ -44,13 +46,14 @@ func NewApp(mode string) *App {
 	}
 
 	// Initialize with a default current user for host mode
+	// Note: host user is NOT added to users map, so it won't appear in user lists
 	if mode == "host" {
 		app.currentUser = &User{
 			ID:       "host",
-			Name:     "Host User",
+			Name:     "Host (Admin)",
 			IsOnline: true,
 		}
-		app.users["host"] = app.currentUser
+		// Do NOT add to app.users - host should not appear in user list
 	}
 
 	return app
@@ -71,6 +74,19 @@ func (a *App) startup(ctx context.Context) {
 
 		// Start HTTP server for central server functionality
 		a.StartHTTPServer("8080")
+	} else if a.Mode == "client" {
+		// Initialize network client for client mode
+		a.networkClient = NewNetworkClient("http://localhost:8080")
+
+		// Try to connect to server
+		if err := a.networkClient.ConnectToServer(); err != nil {
+			fmt.Printf("Warning: Could not connect to server: %v\n", err)
+			fmt.Println("Please make sure the host is running in host mode")
+		} else {
+			// Start automatic sync every 5 seconds
+			a.networkClient.StartAutoSync(5 * time.Second)
+			fmt.Println("Connected to central server and started auto-sync")
+		}
 	}
 }
 
@@ -126,11 +142,7 @@ func (a *App) Invite(userID string) string {
 		user.RoomID = &a.currentRoom.ID
 	}
 
-	// Add current user to room if not already there
-	if !contains(a.currentRoom.UserIDs, a.currentUser.ID) {
-		a.currentRoom.UserIDs = append(a.currentRoom.UserIDs, a.currentUser.ID)
-		a.currentUser.RoomID = &a.currentRoom.ID
-	}
+	// Note: Host is NOT added to room, host only manages/observes
 
 	return fmt.Sprintf("Successfully invited %s to room %s", user.Name, a.currentRoom.Name)
 }
@@ -150,6 +162,7 @@ func (a *App) CreateUser(name string) *User {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	// Generate user ID based on current user count
 	userID := fmt.Sprintf("user_%d", len(a.users)+1)
 	user := &User{
 		ID:       userID,
@@ -157,6 +170,7 @@ func (a *App) CreateUser(name string) *User {
 		IsOnline: true,
 	}
 	a.users[userID] = user
+	fmt.Printf("Created user: %s (ID: %s)\n", name, userID)
 	return user
 }
 
@@ -182,6 +196,30 @@ func (a *App) GetAllRooms() []*Room {
 // GetMode returns the current application mode
 func (a *App) GetMode() string {
 	return a.Mode
+}
+
+// GetConnectionStatus returns whether the client is connected to the server
+func (a *App) GetConnectionStatus() bool {
+	if a.networkClient == nil {
+		return false
+	}
+	return a.networkClient.IsConnected()
+}
+
+// SyncFromServer manually triggers a data sync from the server (client mode only)
+func (a *App) SyncFromServer() error {
+	if a.Mode != "client" || a.networkClient == nil {
+		return fmt.Errorf("sync only available in client mode")
+	}
+	return a.networkClient.SyncData()
+}
+
+// GetServerUsers fetches users from the server (client mode)
+func (a *App) GetServerUsers() ([]*User, error) {
+	if a.Mode != "client" || a.networkClient == nil {
+		return nil, fmt.Errorf("this function is only available in client mode")
+	}
+	return a.networkClient.FetchUsers()
 }
 
 // LeaveRoom removes a user from their current room
