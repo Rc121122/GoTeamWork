@@ -6,6 +6,8 @@ export function CreateUser(arg1:string):Promise<main.User>;
 
 export function GetAllRooms():Promise<Array<main.Room>>;
 
+export function GetChatHistory(arg1:string):Promise<Array<main.ChatMessage>>;
+
 export function GetConnectionStatus():Promise<boolean>;
 
 export function GetCurrentRoom():Promise<main.Room>;
@@ -21,6 +23,8 @@ export function Invite(arg1:string):Promise<string>;
 export function LeaveRoom(arg1:string):Promise<string>;
 
 export function ListAllUsers():Promise<Array<main.User>>;
+
+export function SendChatMessage(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function StartHTTPServer(arg1:string):Promise<void>;
 

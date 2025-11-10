@@ -23,16 +23,16 @@ Tree Structure, 3 main modules:
 ### Weekly goal:
 - Week 1 (11/4):
   1. Central-server implement(join/leave room, chatroom) - Assigned to mr.Lin
-     - Implement join room functionality in app.go
-     - Implement leave room functionality in app.go
-     - Implement chat message sending and receiving in app.go
+     - ~~Implement join room functionality in app.go~~ ✅
+     - ~~Implement leave room functionality in app.go~~ ✅ (Backend LeaveRoom() exists, needs API endpoint)
+     - ~~Implement chat message sending and receiving in app.go~~ ✅
   2. UI(chatroom, connection status) - Assigned to mr.Chang
-     - Build chatroom interface in frontend
-     - Add connection status display in UI
+     - ~~Build chatroom interface in frontend~~ ✅
+     - ~~Add connection status display in UI~~ ✅
   3. network.go(connect to central server) - Assigned to mr.Ho
-     - Add connection logic to central server in network.go
-     - Handle connection establishment and errors
-     - Fetch data to local db
+     - ~~Add connection logic to central server in network.go~~ ✅
+     - ~~Handle connection establishment and errors~~ ✅
+     - ~~Fetch data to local db~~ ✅
 
 - Week 2 (11/11):
   1. Password for rooms(Central-server) - Assigned to mr.Lin

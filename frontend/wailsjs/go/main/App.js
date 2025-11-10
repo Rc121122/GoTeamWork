@@ -10,6 +10,10 @@ export function GetAllRooms() {
   return window['go']['main']['App']['GetAllRooms']();
 }
 
+export function GetChatHistory(arg1) {
+  return window['go']['main']['App']['GetChatHistory'](arg1);
+}
+
 export function GetConnectionStatus() {
   return window['go']['main']['App']['GetConnectionStatus']();
 }
@@ -40,6 +44,10 @@ export function LeaveRoom(arg1) {
 
 export function ListAllUsers() {
   return window['go']['main']['App']['ListAllUsers']();
+}
+
+export function SendChatMessage(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SendChatMessage'](arg1, arg2, arg3);
 }
 
 export function StartHTTPServer(arg1) {

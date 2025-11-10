@@ -24,6 +24,73 @@ type Room struct {
 	UserIDs []string `json:"userIds"`
 }
 
+// ChatMessage represents a chat message
+type ChatMessage struct {
+	ID        string `json:"id"`
+	RoomID    string `json:"roomId"`
+	UserID    string `json:"userId"`
+	UserName  string `json:"userName"`
+	Message   string `json:"message"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// ChatPool manages chat history for all rooms
+type ChatPool struct {
+	messages map[string][]*ChatMessage // roomID -> messages
+	counter  int
+	mu       sync.RWMutex
+}
+
+// NewChatPool creates a new chat pool
+func NewChatPool() *ChatPool {
+	return &ChatPool{
+		messages: make(map[string][]*ChatMessage),
+		counter:  0,
+	}
+}
+
+// AddMessage adds a message to the chat pool
+func (cp *ChatPool) AddMessage(roomID, userID, userName, message string) *ChatMessage {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+
+	cp.counter++
+	msg := &ChatMessage{
+		ID:        fmt.Sprintf("msg_%d", cp.counter),
+		RoomID:    roomID,
+		UserID:    userID,
+		UserName:  userName,
+		Message:   message,
+		Timestamp: time.Now().Unix(),
+	}
+
+	cp.messages[roomID] = append(cp.messages[roomID], msg)
+	return msg
+}
+
+// GetMessages returns all messages for a room
+func (cp *ChatPool) GetMessages(roomID string) []*ChatMessage {
+	cp.mu.RLock()
+	defer cp.mu.RUnlock()
+
+	messages := cp.messages[roomID]
+	if messages == nil {
+		return []*ChatMessage{}
+	}
+
+	// Return a copy to prevent external modification
+	result := make([]*ChatMessage, len(messages))
+	copy(result, messages)
+	return result
+}
+
+// ClearRoomMessages clears all messages for a room
+func (cp *ChatPool) ClearRoomMessages(roomID string) {
+	cp.mu.Lock()
+	defer cp.mu.Unlock()
+	delete(cp.messages, roomID)
+}
+
 // App struct
 type App struct {
 	ctx           context.Context
@@ -33,6 +100,7 @@ type App struct {
 	currentUser   *User
 	currentRoom   *Room
 	roomCounter   int
+	chatPool      *ChatPool
 	mu            sync.RWMutex
 	networkClient *NetworkClient // For client mode
 }
@@ -40,9 +108,10 @@ type App struct {
 // NewApp creates a new App application struct
 func NewApp(mode string) *App {
 	app := &App{
-		Mode:  mode,
-		users: make(map[string]*User),
-		rooms: make(map[string]*Room),
+		Mode:       mode,
+		users:      make(map[string]*User),
+		rooms:      make(map[string]*Room),
+		chatPool:   NewChatPool(),
 	}
 
 	// Initialize with a default current user for host mode
@@ -50,10 +119,13 @@ func NewApp(mode string) *App {
 	if mode == "host" {
 		app.currentUser = &User{
 			ID:       "host",
-			Name:     "Host (Admin)",
+			Name:     "Host Server",
 			IsOnline: true,
 		}
-		// Do NOT add to app.users - host should not appear in user list
+		// DO NOT add host to users map - host is not a regular user
+		// Host manages the server but doesn't participate in rooms
+	} else if mode == "client" {
+		// Client mode will set currentUser when user logs in
 	}
 
 	return app
@@ -65,7 +137,7 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	fmt.Printf("Starting in %s mode\n", a.Mode)
 
-	// Initialize test users in host mode
+	// Initialize test users only for host mode (but not the host itself)
 	if a.Mode == "host" {
 		a.CreateUser("Alice")
 		a.CreateUser("Bob")
@@ -83,8 +155,8 @@ func (a *App) startup(ctx context.Context) {
 			fmt.Printf("Warning: Could not connect to server: %v\n", err)
 			fmt.Println("Please make sure the host is running in host mode")
 		} else {
-			// Start automatic sync every 5 seconds
-			a.networkClient.StartAutoSync(5 * time.Second)
+			// Start automatic sync every 10 seconds (reduced from 5)
+			a.networkClient.StartAutoSync(10 * time.Second)
 			fmt.Println("Connected to central server and started auto-sync")
 		}
 	}
@@ -272,15 +344,46 @@ func (a *App) LeaveRoom(userID string) string {
 	return fmt.Sprintf("%s left room %s", user.Name, room.Name)
 }
 
-// StartHTTPServer starts the HTTP server for REST API
-func (a *App) StartHTTPServer(port string) {
-	http.HandleFunc("/api/users", a.handleUsersAndCreate)
-	http.HandleFunc("/api/users/", a.handleUser)
-	http.HandleFunc("/api/rooms", a.handleRooms)
-	http.HandleFunc("/api/invite", a.handleInvite)
+// SendChatMessage sends a chat message to a room
+func (a *App) SendChatMessage(roomID, userID, message string) string {
+	a.mu.RLock()
+	user, exists := a.users[userID]
+	a.mu.RUnlock()
 
-	fmt.Printf("Starting HTTP server on port %s\n", port)
-	go http.ListenAndServe(":"+port, nil)
+	if !exists {
+		return "Error: User not found"
+	}
+
+	if user.RoomID == nil || *user.RoomID != roomID {
+		return "Error: User is not in this room"
+	}
+
+	a.mu.RLock()
+	_, roomExists := a.rooms[roomID]
+	a.mu.RUnlock()
+
+	if !roomExists {
+		return "Error: Room not found"
+	}
+
+	// Add message to chat pool
+	chatMsg := a.chatPool.AddMessage(roomID, userID, user.Name, message)
+
+	fmt.Printf("Chat message from %s in room %s: %s\n", user.Name, roomID, message)
+	return fmt.Sprintf("Message sent: %s", chatMsg.ID)
+}
+
+// GetChatHistory returns chat history for a room
+func (a *App) GetChatHistory(roomID string) []*ChatMessage {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	// Verify room exists
+	if _, exists := a.rooms[roomID]; !exists {
+		return []*ChatMessage{}
+	}
+
+	return a.chatPool.GetMessages(roomID)
 }
 
 // handleUsersAndCreate handles GET /api/users (list all users) and POST /api/users (create user)
@@ -430,4 +533,61 @@ func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 	result := a.Invite(req.UserID)
 	response := map[string]string{"message": result}
 	json.NewEncoder(w).Encode(response)
+}
+
+// handleChat handles POST /api/chat (send message) and GET /api/chat/{roomId}
+func (a *App) handleChat(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
+	// Extract room ID from URL path
+	path := r.URL.Path
+	roomID := ""
+	if len(path) > len("/api/chat/") {
+		roomID = path[len("/api/chat/"):]
+	}
+
+	if r.Method == "GET" && roomID != "" {
+		messages := a.GetChatHistory(roomID)
+		json.NewEncoder(w).Encode(messages)
+		return
+	}
+
+	if r.Method == "POST" {
+		var req struct {
+			RoomID  string `json:"roomId"`
+			UserID  string `json:"userId"`
+			Message string `json:"message"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		result := a.SendChatMessage(req.RoomID, req.UserID, req.Message)
+		response := map[string]string{"message": result}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+// StartHTTPServer starts the HTTP server for REST API
+func (a *App) StartHTTPServer(port string) {
+	http.HandleFunc("/api/users", a.handleUsersAndCreate)
+	http.HandleFunc("/api/users/", a.handleUser)
+	http.HandleFunc("/api/rooms", a.handleRooms)
+	http.HandleFunc("/api/invite", a.handleInvite)
+	http.HandleFunc("/api/chat", a.handleChat)
+	http.HandleFunc("/api/chat/", a.handleChat)
+
+	fmt.Printf("Starting HTTP server on port %s\n", port)
+	go http.ListenAndServe(":"+port, nil)
 }
