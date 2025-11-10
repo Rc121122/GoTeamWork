@@ -45,6 +45,44 @@ Tree Structure, 3 main modules:
      - Create UI component to display clipboard content thumbnails
      - Integrate thumbnail display with clipboard management
 
+  **CRITICAL IMPROVEMENTS & BUG FIXES (Week 2 Priority):**
+  
+  **Architecture & Code Quality:**
+  - Refactor duplicated HTTP header setup into middleware function (app.go)
+  - Extract user validation logic into reusable helper functions
+  - Remove test users (Alice, Bob, Charlie) from production startup
+  - Create proper configuration file for server settings (port, timeouts, etc.)
+  
+  **Missing Functionality:**
+  - Add /api/leave endpoint for room leaving (currently only frontend exists)
+  - Implement proper clipboard sharing backend API (currently localStorage only)
+  - Add user disconnect detection and automatic cleanup
+  - Implement heartbeat/ping mechanism for connection monitoring
+  
+  **Memory & Resource Management:**
+  - Implement chat history limit (e.g., 100 messages per room) with cleanup
+  - Add automatic room deletion when empty for >5 minutes
+  - Implement user session timeout and cleanup for inactive users
+  - Add garbage collection for old/unused data structures
+  
+  **Collaboration & Synchronization:**
+  - Fix potential race condition in concurrent room access
+  - Implement message ordering/sequencing for chat history
+  - Add timestamp-based conflict resolution for data sync
+  - Prevent duplicate user creation with proper locking
+  
+  **Error Handling & Stability:**
+  - Add comprehensive error logging system
+  - Implement graceful shutdown for server and cleanup resources
+  - Add retry logic for failed network requests
+  - Implement circuit breaker pattern for unstable connections
+  
+  **Security (Preparation for password feature):**
+  - Add input sanitization for user names and chat messages
+  - Implement rate limiting for API endpoints
+  - Add CORS configuration for production environment
+  - Prepare password hashing infrastructure (bcrypt/argon2)
+
 - Week 3 (11/18):
   1. LAN search & invite - Assigned to mr.Lin
      - Implement LAN device discovery mechanism
