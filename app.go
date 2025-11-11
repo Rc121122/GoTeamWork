@@ -2,44 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
 )
-
-// User represents a user in the system
-type User struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	RoomID   *string `json:"roomId,omitempty"` // nil if not in any room
-	IsOnline bool    `json:"isOnline"`
-}
-
-// Room represents a collaboration room
-type Room struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	UserIDs []string `json:"userIds"`
-}
-
-// ChatMessage represents a chat message
-type ChatMessage struct {
-	ID        string `json:"id"`
-	RoomID    string `json:"roomId"`
-	UserID    string `json:"userId"`
-	UserName  string `json:"userName"`
-	Message   string `json:"message"`
-	Timestamp int64  `json:"timestamp"`
-}
-
-// ChatPool manages chat history for all rooms
-type ChatPool struct {
-	messages map[string][]*ChatMessage // roomID -> messages
-	counter  int
-	mu       sync.RWMutex
-}
 
 // NewChatPool creates a new chat pool
 func NewChatPool() *ChatPool {
@@ -103,6 +70,7 @@ type App struct {
 	chatPool      *ChatPool
 	mu            sync.RWMutex
 	networkClient *NetworkClient // For client mode
+	sseManager    *SSEManager    // For SSE events
 }
 
 // NewApp creates a new App application struct
@@ -112,6 +80,7 @@ func NewApp(mode string) *App {
 		users:      make(map[string]*User),
 		rooms:      make(map[string]*Room),
 		chatPool:   NewChatPool(),
+		sseManager: NewSSEManager(),
 	}
 
 	// Initialize with a default current user for host mode
@@ -212,11 +181,40 @@ func (a *App) Invite(userID string) string {
 	if !contains(a.currentRoom.UserIDs, userID) {
 		a.currentRoom.UserIDs = append(a.currentRoom.UserIDs, userID)
 		user.RoomID = &a.currentRoom.ID
+		
+		// Notify the invited user via SSE
+		inviteData := map[string]interface{}{
+			"roomId":   a.currentRoom.ID,
+			"roomName": a.currentRoom.Name,
+			"inviter":  "Host",
+		}
+		a.sseManager.SendToClient(userID, EventUserInvited, inviteData)
 	}
 
 	// Note: Host is NOT added to room, host only manages/observes
 
 	return fmt.Sprintf("Successfully invited %s to room %s", user.Name, a.currentRoom.Name)
+}
+
+// CreateRoom creates a new room with the given name
+func (a *App) CreateRoom(name string) *Room {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.roomCounter++
+	roomID := fmt.Sprintf("room_%d", a.roomCounter)
+	room := &Room{
+		ID:      roomID,
+		Name:    name,
+		UserIDs: []string{},
+	}
+	a.rooms[roomID] = room
+
+	// Notify via SSE
+	a.sseManager.BroadcastToAll(EventRoomCreated, room)
+
+	fmt.Printf("Room created: %s (%s)\n", name, roomID)
+	return room
 }
 
 // Helper function to check if slice contains string
@@ -243,6 +241,10 @@ func (a *App) CreateUser(name string) *User {
 	}
 	a.users[userID] = user
 	fmt.Printf("Created user: %s (ID: %s)\n", name, userID)
+
+	// Notify via SSE
+	a.sseManager.BroadcastToAll(EventUserCreated, user)
+
 	return user
 }
 
@@ -369,6 +371,9 @@ func (a *App) SendChatMessage(roomID, userID, message string) string {
 	// Add message to chat pool
 	chatMsg := a.chatPool.AddMessage(roomID, userID, user.Name, message)
 
+	// Notify via SSE
+	a.sseManager.BroadcastToRoom(roomID, EventChatMessage, chatMsg, userID)
+
 	fmt.Printf("Chat message from %s in room %s: %s\n", user.Name, roomID, message)
 	return fmt.Sprintf("Message sent: %s", chatMsg.ID)
 }
@@ -386,207 +391,16 @@ func (a *App) GetChatHistory(roomID string) []*ChatMessage {
 	return a.chatPool.GetMessages(roomID)
 }
 
-// handleUsersAndCreate handles GET /api/users (list all users) and POST /api/users (create user)
-func (a *App) handleUsersAndCreate(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	if r.Method == "OPTIONS" {
-		return
-	}
-
-	if r.Method == "GET" {
-		users := a.ListAllUsers()
-		json.NewEncoder(w).Encode(users)
-		return
-	}
-
-	if r.Method == "POST" {
-		var req struct {
-			Name string `json:"name"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		// Check if username is unique
-		a.mu.RLock()
-		for _, user := range a.users {
-			if user.Name == req.Name {
-				a.mu.RUnlock()
-				http.Error(w, "Username already exists", http.StatusConflict)
-				return
-			}
-		}
-		a.mu.RUnlock()
-
-		user := a.CreateUser(req.Name)
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(user)
-		return
-	}
-
-	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-}
-
-// handleUser handles POST /api/users (create user) and GET /api/users/{id}
-func (a *App) handleUser(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	if r.Method == "OPTIONS" {
-		return
-	}
-
-	// Extract user ID from URL path
-	path := r.URL.Path
-	userID := ""
-	if len(path) > len("/api/users/") {
-		userID = path[len("/api/users/"):]
-	}
-
-	if r.Method == "GET" && userID != "" {
-		a.mu.RLock()
-		user, exists := a.users[userID]
-		a.mu.RUnlock()
-
-		if !exists {
-			http.Error(w, "User not found", http.StatusNotFound)
-			return
-		}
-		json.NewEncoder(w).Encode(user)
-		return
-	}
-
-	if r.Method == "POST" && userID == "" {
-		var req struct {
-			Name string `json:"name"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		// Check if username is unique
-		a.mu.RLock()
-		for _, user := range a.users {
-			if user.Name == req.Name {
-				a.mu.RUnlock()
-				http.Error(w, "Username already exists", http.StatusConflict)
-				return
-			}
-		}
-		a.mu.RUnlock()
-
-		user := a.CreateUser(req.Name)
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(user)
-		return
-	}
-
-	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-}
-
-// handleRooms handles GET /api/rooms
-func (a *App) handleRooms(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	rooms := a.GetAllRooms()
-	json.NewEncoder(w).Encode(rooms)
-}
-
-// handleInvite handles POST /api/invite
-func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	if r.Method == "OPTIONS" {
-		return
-	}
-
-	if r.Method != "POST" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		UserID string `json:"userId"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	result := a.Invite(req.UserID)
-	response := map[string]string{"message": result}
-	json.NewEncoder(w).Encode(response)
-}
-
-// handleChat handles POST /api/chat (send message) and GET /api/chat/{roomId}
-func (a *App) handleChat(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	if r.Method == "OPTIONS" {
-		return
-	}
-
-	// Extract room ID from URL path
-	path := r.URL.Path
-	roomID := ""
-	if len(path) > len("/api/chat/") {
-		roomID = path[len("/api/chat/"):]
-	}
-
-	if r.Method == "GET" && roomID != "" {
-		messages := a.GetChatHistory(roomID)
-		json.NewEncoder(w).Encode(messages)
-		return
-	}
-
-	if r.Method == "POST" {
-		var req struct {
-			RoomID  string `json:"roomId"`
-			UserID  string `json:"userId"`
-			Message string `json:"message"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		result := a.SendChatMessage(req.RoomID, req.UserID, req.Message)
-		response := map[string]string{"message": result}
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-
-	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-}
-
 // StartHTTPServer starts the HTTP server for REST API
 func (a *App) StartHTTPServer(port string) {
-	http.HandleFunc("/api/users", a.handleUsersAndCreate)
-	http.HandleFunc("/api/users/", a.handleUser)
+	http.HandleFunc("/api/users", a.handleUsers)
+	http.HandleFunc("/api/users/", a.handleUserByID)
 	http.HandleFunc("/api/rooms", a.handleRooms)
 	http.HandleFunc("/api/invite", a.handleInvite)
 	http.HandleFunc("/api/chat", a.handleChat)
 	http.HandleFunc("/api/chat/", a.handleChat)
+	http.HandleFunc("/api/leave", a.handleLeave)
+	http.HandleFunc("/api/sse", a.handleSSE)
 
 	fmt.Printf("Starting HTTP server on port %s\n", port)
 	go http.ListenAndServe(":"+port, nil)

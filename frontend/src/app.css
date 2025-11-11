@@ -650,3 +650,56 @@ h2 {
     max-height: 500px;
     overflow-y: auto;
 }
+
+/* Invite Button Styles */
+.invite-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    margin-left: auto;
+}
+
+.invite-btn:hover {
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.invite-btn:active {
+    transform: translateY(0);
+}
+
+/* Create Room Button Styles */
+.create-room-btn {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+}
+
+.create-room-btn:hover {
+    background: linear-gradient(135deg, #218838 0%, #1aa085 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(40, 167, 69, 0.4);
+}
+
+.create-room-btn:active {
+    transform: translateY(0);
+}
+
+.room-controls {
+    margin-bottom: 1rem;
+}
