@@ -1,133 +1,123 @@
-# JavaScript API Methods
+# JavaScript & HTTP API Reference
 
-## Core Application Methods
+The desktop client communicates with the Go backend through two layers:
 
-### GetMode()
-- **Description**: Returns the current application mode ('host' or 'client')
-- **Returns**: `Promise<string>`
-- **Usage**: `const mode = await GetMode()`
+- **Wails bindings** exposed under `frontend/wailsjs/go/main/App`. These are Promise-based helpers generated from exported Go methods on `App`.
+- **HTTP + SSE endpoints** served by the host instance (`StartHTTPServer` binds to `http://localhost:8080`). The web client (`frontend/src`) uses these endpoints directly.
 
-### Greet(name: string)
-- **Description**: Returns a greeting message for the given name
-- **Parameters**: `name` (string) - The name to greet
-- **Returns**: `Promise<string>`
-- **Usage**: `const greeting = await Greet("John")`
+All TypeScript models referenced below are defined in `frontend/wailsjs/go/models.ts`.
 
-## User Management Methods
+## Wails Bindings (`main.App`)
 
-### ListAllUsers()
-- **Description**: Returns a list of all users in the system
-- **Returns**: `Promise<Array<main.User>>`
-- **Usage**: `const users = await ListAllUsers()`
+### Application & Connectivity
+- `GetMode(): Promise<string>` → Returns `'host'` or `'client'` based on launch flag.
+- `GetConnectionStatus(): Promise<boolean>` → Client-only helper that reports the `NetworkClient` connectivity state.
+- `SyncFromServer(): Promise<void>` → Client-only manual sync that refreshes cached users/rooms from the host.
+- `StartHTTPServer(port: string): Promise<void>` → Host-only. Starts the embedded REST/SSE server (already invoked automatically on startup in host mode).
+- `Greet(name: string): Promise<string>` → Simple diagnostics helper used in samples.
 
-### CreateUser(name: string)
-- **Description**: Creates a new user in the system
-- **Parameters**: `name` (string) - The username for the new user
-- **Returns**: `Promise<main.User>`
-- **Usage**: `const user = await CreateUser("Alice")`
+### User Management
+- `ListAllUsers(): Promise<Array<main.User>>` → Host-side map snapshot of known users.
+- `CreateUser(name: string): Promise<main.User>` → Host-only creator that emits a `user_created` SSE event.
+- `GetServerUsers(): Promise<Array<main.User>>` → Client helper that proxies `/api/users` via `NetworkClient`.
 
-## Room Management Methods
+### Room Management
+- `GetAllRooms(): Promise<Array<main.Room>>` → Returns every room tracked by the host.
+- `GetCurrentRoom(): Promise<main.Room | null>` → Host-side pointer to the room created via `Invite`. Returns `null` when no active room.
+- `CreateRoom(name: string): Promise<main.Room>` → Host-only explicit room creation. Emits `room_created` SSE events.
+- `Invite(userId: string): Promise<string>` → Host-only convenience that lazily creates the current room (if needed), adds the user, and emits `user_invited` SSE payloads.
+- `LeaveRoom(userId: string): Promise<string>` → Removes a user from their room; auto-deletes rooms that fall below two members.
 
-### GetAllRooms()
-- **Description**: Returns all rooms in the system
-- **Returns**: `Promise<Array<main.Room>>`
-- **Usage**: `const rooms = await GetAllRooms()`
+### Chat
+- `SendChatMessage(roomId: string, userId: string, message: string): Promise<string>` → Saves the message via `ChatPool` and emits `chat_message` SSE events to other room members.
+- `GetChatHistory(roomId: string): Promise<Array<main.ChatMessage>>` → Returns the stored chat transcript for the provided room.
 
-### GetCurrentRoom()
-- **Description**: Returns information about the current room
-- **Returns**: `Promise<main.Room>`
-- **Usage**: `const currentRoom = await GetCurrentRoom()`
+## REST Endpoints (host mode)
 
-### Invite(userID: string)
-- **Description**: Invites a user to the current room. Creates a new room if none exists.
-- **Parameters**: `userID` (string) - The ID of the user to invite
-- **Returns**: `Promise<string>` - Success/error message
-- **Usage**: `const result = await Invite("user_123")`
+Unless otherwise noted, responses are JSON. Request DTOs live in `types.go`.
 
-### LeaveRoom(userID: string)
-- **Description**: Removes a user from their current room. Deletes room if < 2 users remain.
-- **Parameters**: `userID` (string) - The ID of the user leaving
-- **Returns**: `Promise<string>` - Success/error message
-- **Usage**: `const result = await LeaveRoom("user_123")`
+- `GET /api/users` → `main.User[]` snapshot.
+- `POST /api/users { name: string }` → Creates a user. Returns `201` with `main.User` or `409` if the name is already taken.
+- `GET /api/users/{id}` → Retrieves a single user or returns `404`.
+- `GET /api/rooms` → `main.Room[]` describing current rooms.
+- `POST /api/rooms { name: string }` → Explicit room creation (host dashboards, tests).
+- `POST /api/invite { userId: string }` → Adds the user to the current room, creating one if required. Response `{ message: string }` mirrors `Invite` result text.
+- `POST /api/chat { roomId, userId, message }` → Persists a chat message and triggers SSE updates. Response `{ message: string }`.
+- `GET /api/chat/{roomId}` → Historical chat transcript (`main.ChatMessage[]`).
+- `POST /api/leave { userId: string }` → Removes the user from their room and may tear down the room. Response `{ message: string }`.
 
-## Server Methods
+### Server-Sent Events
 
-### StartHTTPServer(port: string)
-- **Description**: Starts the HTTP server for REST API (host mode only)
-- **Parameters**: `port` (string) - The port number to listen on
-- **Returns**: `Promise<void>`
-- **Usage**: `await StartHTTPServer("8080")`
+- `GET /api/sse?userId=<id>` → Opens an SSE stream for the user. The handler keeps the connection alive with 30s heartbeats and cleans up on disconnect.
+- Event payloads are wrapped as `{ type, data, timestamp }`:
+    - `connected` → `{ status: "connected" }`
+  - `user_created` → `main.User`
+  - `room_created` → `main.Room`
+  - `user_invited` → `{ roomId, roomName, inviter }`
+  - `chat_message` → `main.ChatMessage`
+  - `heartbeat` → `{ timestamp }` (maintenance; emitted automatically)
 
-## Data Structures
+## Core Data Structures
 
-### User
 ```typescript
-interface User {
-    id: string;        // Unique user identifier
-    name: string;      // Display name
-    roomId?: string;   // Current room ID (optional)
-    isOnline: boolean; // Online status
+export interface User {
+    id: string;
+    name: string;
+    roomId?: string;
+    isOnline: boolean;
+}
+
+export interface Room {
+    id: string;
+    name: string;
+    userIds: string[];
+}
+
+export interface ChatMessage {
+    id: string;
+    roomId: string;
+    userId: string;
+    userName: string;
+    message: string;
+    timestamp: number; // Unix seconds
 }
 ```
 
-### Room
-```typescript
-interface Room {
-    id: string;      // Unique room identifier
-    name: string;    // Display name
-    userIds: string[]; // Array of user IDs in the room
-}
+### REST DTOs
+
+```jsonc
+// POST /api/users
+{ "name": string }
+
+// POST /api/invite
+{ "userId": string }
+
+// POST /api/chat
+{ "roomId": string, "userId": string, "message": string }
+
+// POST /api/leave
+{ "userId": string }
+
+// POST /api/rooms
+{ "name": string }
+
+// Generic success envelope
+{ "message": string }
 ```
 
-## REST API Endpoints (Host Mode)
-
-### GET /api/users
-- **Description**: List all users
-- **Response**: `Array<User>`
-
-### POST /api/users
-- **Description**: Create a new user
-- **Body**: `{"name": "username"}`
-- **Response**: `User`
-
-### GET /api/users/{id}
-- **Description**: Get specific user by ID
-- **Response**: `User`
-
-### GET /api/rooms
-- **Description**: List all rooms
-- **Response**: `Array<Room>`
-
-### POST /api/invite
-- **Description**: Invite a user to current room
-- **Body**: `{"userId": "user_id"}`
-- **Response**: `{"message": "result message"}`
-
-## Usage Examples
+## Quick Usage Example
 
 ```javascript
-// Check application mode
+import { GetMode, ListAllUsers, Invite } from '../wailsjs/go/main/App';
+
 const mode = await GetMode();
-console.log('Running in', mode, 'mode');
 
-// List all users
-const users = await ListAllUsers();
-users.forEach(user => {
-    console.log(`${user.name} (${user.isOnline ? 'online' : 'offline'})`);
-});
-
-// Create a new user
-const newUser = await CreateUser("Bob");
-console.log('Created user:', newUser.name);
-
-// Invite user to room
-const inviteResult = await Invite(newUser.id);
-console.log('Invite result:', inviteResult);
-
-// Get current room info
-const currentRoom = await GetCurrentRoom();
-if (currentRoom) {
-    console.log('Current room:', currentRoom.name);
-    console.log('Users in room:', currentRoom.userIds.length);
+if (mode === 'host') {
+    const users = await ListAllUsers();
+    const firstUser = users.at(0);
+    if (firstUser) {
+        const result = await Invite(firstUser.id);
+        console.log(result);
+    }
 }
 ```

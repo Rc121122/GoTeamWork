@@ -181,14 +181,16 @@ func (a *App) Invite(userID string) string {
 	if !contains(a.currentRoom.UserIDs, userID) {
 		a.currentRoom.UserIDs = append(a.currentRoom.UserIDs, userID)
 		user.RoomID = &a.currentRoom.ID
-		
+
 		// Notify the invited user via SSE
 		inviteData := map[string]interface{}{
 			"roomId":   a.currentRoom.ID,
 			"roomName": a.currentRoom.Name,
 			"inviter":  "Host",
 		}
-		a.sseManager.SendToClient(userID, EventUserInvited, inviteData)
+		if err := a.sseManager.SendToClient(userID, EventUserInvited, inviteData); err != nil {
+			fmt.Printf("Failed to send invite event to %s: %v\n", userID, err)
+		}
 	}
 
 	// Note: Host is NOT added to room, host only manages/observes
@@ -349,32 +351,44 @@ func (a *App) LeaveRoom(userID string) string {
 // SendChatMessage sends a chat message to a room
 func (a *App) SendChatMessage(roomID, userID, message string) string {
 	a.mu.RLock()
-	user, exists := a.users[userID]
+	user, userExists := a.users[userID]
+	room, roomExists := a.rooms[roomID]
+
+	userName := ""
+	userInRoom := false
+	if userExists {
+		userName = user.Name
+		if user.RoomID != nil && *user.RoomID == roomID {
+			userInRoom = true
+		}
+	}
+
+	members := make([]string, 0)
+	if roomExists {
+		members = append(members, room.UserIDs...)
+	}
+
 	a.mu.RUnlock()
 
-	if !exists {
+	if !userExists {
 		return "Error: User not found"
 	}
-
-	if user.RoomID == nil || *user.RoomID != roomID {
-		return "Error: User is not in this room"
-	}
-
-	a.mu.RLock()
-	_, roomExists := a.rooms[roomID]
-	a.mu.RUnlock()
 
 	if !roomExists {
 		return "Error: Room not found"
 	}
 
+	if !userInRoom {
+		return "Error: User is not in this room"
+	}
+
 	// Add message to chat pool
-	chatMsg := a.chatPool.AddMessage(roomID, userID, user.Name, message)
+	chatMsg := a.chatPool.AddMessage(roomID, userID, userName, message)
 
 	// Notify via SSE
-	a.sseManager.BroadcastToRoom(roomID, EventChatMessage, chatMsg, userID)
+	a.sseManager.BroadcastToUsers(members, EventChatMessage, chatMsg, userID)
 
-	fmt.Printf("Chat message from %s in room %s: %s\n", user.Name, roomID, message)
+	fmt.Printf("Chat message from %s in room %s: %s\n", userName, roomID, message)
 	return fmt.Sprintf("Message sent: %s", chatMsg.ID)
 }
 

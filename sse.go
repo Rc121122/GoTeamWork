@@ -12,13 +12,14 @@ import (
 type SSEEventType string
 
 const (
-	EventUserCreated  SSEEventType = "user_created"
-	EventUserLeft     SSEEventType = "user_left"
-	EventRoomCreated  SSEEventType = "room_created"
-	EventRoomDeleted  SSEEventType = "room_deleted"
-	EventUserInvited  SSEEventType = "user_invited"
-	EventChatMessage  SSEEventType = "chat_message"
-	EventHeartbeat    SSEEventType = "heartbeat"
+	EventConnected   SSEEventType = "connected"
+	EventUserCreated SSEEventType = "user_created"
+	EventUserLeft    SSEEventType = "user_left"
+	EventRoomCreated SSEEventType = "room_created"
+	EventRoomDeleted SSEEventType = "room_deleted"
+	EventUserInvited SSEEventType = "user_invited"
+	EventChatMessage SSEEventType = "chat_message"
+	EventHeartbeat   SSEEventType = "heartbeat"
 )
 
 // SSEEvent represents a server-sent event
@@ -33,6 +34,7 @@ type SSEClient struct {
 	UserID  string
 	Writer  http.ResponseWriter
 	Flusher http.Flusher
+	mu      sync.Mutex
 }
 
 // SSEManager manages SSE connections and broadcasts events
@@ -49,14 +51,17 @@ func NewSSEManager() *SSEManager {
 }
 
 // AddClient adds a new SSE client
-func (sm *SSEManager) AddClient(userID string, w http.ResponseWriter, flusher http.Flusher) {
+func (sm *SSEManager) AddClient(userID string, w http.ResponseWriter, flusher http.Flusher) *SSEClient {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	sm.clients[userID] = &SSEClient{
+
+	client := &SSEClient{
 		UserID:  userID,
 		Writer:  w,
 		Flusher: flusher,
 	}
+	sm.clients[userID] = client
+	return client
 }
 
 // RemoveClient removes an SSE client
@@ -68,82 +73,111 @@ func (sm *SSEManager) RemoveClient(userID string) {
 
 // SendToClient sends an event to a specific client
 func (sm *SSEManager) SendToClient(userID string, eventType SSEEventType, data interface{}) error {
-	sm.mu.RLock()
-	client, exists := sm.clients[userID]
-	sm.mu.RUnlock()
-
-	if !exists {
-		return fmt.Errorf("client not connected")
-	}
-
-	event := SSEEvent{
-		Type:      eventType,
-		Data:      data,
-		Timestamp: time.Now().Unix(),
-	}
-
-	jsonData, err := json.Marshal(event)
+	client, err := sm.getClient(userID)
 	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
+		return err
 	}
 
-	// Send SSE event
-	fmt.Fprintf(client.Writer, "event: %s\n", eventType)
-	fmt.Fprintf(client.Writer, "data: %s\n\n", jsonData)
-	client.Flusher.Flush()
+	if err := client.sendEvent(eventType, data); err != nil {
+		sm.RemoveClient(userID)
+		return fmt.Errorf("failed to send event to client %s: %w", userID, err)
+	}
 
 	return nil
 }
 
 // BroadcastToAll sends an event to all connected clients
 func (sm *SSEManager) BroadcastToAll(eventType SSEEventType, data interface{}) {
-	sm.mu.RLock()
-	clients := make(map[string]*SSEClient)
-	for k, v := range sm.clients {
-		clients[k] = v
+	clients := sm.snapshotClients(nil)
+	for _, client := range clients {
+		if err := client.sendEvent(eventType, data); err != nil {
+			fmt.Printf("BroadcastToAll: dropping client %s due to send error: %v\n", client.UserID, err)
+			sm.RemoveClient(client.UserID)
+		}
 	}
+}
+
+// BroadcastToUsers sends an event to the provided user IDs
+func (sm *SSEManager) BroadcastToUsers(userIDs []string, eventType SSEEventType, data interface{}, excludeUserID string) {
+	targetSet := make(map[string]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		targetSet[id] = struct{}{}
+	}
+
+	filter := func(client *SSEClient) bool {
+		if client.UserID == excludeUserID {
+			return false
+		}
+		_, ok := targetSet[client.UserID]
+		return ok
+	}
+
+	clients := sm.snapshotClients(filter)
+
+	for _, client := range clients {
+		if err := client.sendEvent(eventType, data); err != nil {
+			fmt.Printf("BroadcastToUsers: dropping client %s due to send error: %v\n", client.UserID, err)
+			sm.RemoveClient(client.UserID)
+		}
+	}
+}
+
+// SendHeartbeat sends a heartbeat event if the client is connected
+func (sm *SSEManager) SendHeartbeat(userID string) error {
+	return sm.SendToClient(userID, EventHeartbeat, map[string]int64{"timestamp": time.Now().Unix()})
+}
+
+func (sm *SSEManager) getClient(userID string) (*SSEClient, error) {
+	sm.mu.RLock()
+	client, exists := sm.clients[userID]
 	sm.mu.RUnlock()
 
+	if !exists {
+		return nil, fmt.Errorf("client %s not connected", userID)
+	}
+
+	return client, nil
+}
+
+func (sm *SSEManager) snapshotClients(filter func(*SSEClient) bool) []*SSEClient {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	clients := make([]*SSEClient, 0, len(sm.clients))
+	for _, client := range sm.clients {
+		if filter == nil || filter(client) {
+			clients = append(clients, client)
+		}
+	}
+
+	return clients
+}
+
+func (client *SSEClient) sendEvent(eventType SSEEventType, data interface{}) error {
 	event := SSEEvent{
 		Type:      eventType,
 		Data:      data,
 		Timestamp: time.Now().Unix(),
 	}
 
-	for _, client := range clients {
-		jsonData, _ := json.Marshal(event)
-		fmt.Fprintf(client.Writer, "event: %s\n", eventType)
-		fmt.Fprintf(client.Writer, "data: %s\n\n", jsonData)
-		client.Flusher.Flush()
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal event: %w", err)
 	}
-}
 
-// BroadcastToRoom sends an event to all clients in a specific room
-func (sm *SSEManager) BroadcastToRoom(roomID string, eventType SSEEventType, data interface{}, excludeUserID string) {
-	sm.mu.RLock()
-	clients := make(map[string]*SSEClient)
-	for k, v := range sm.clients {
-		clients[k] = v
+	client.mu.Lock()
+	defer client.mu.Unlock()
+
+	if _, err := fmt.Fprintf(client.Writer, "event: %s\n", eventType); err != nil {
+		return err
 	}
-	sm.mu.RUnlock()
 
-	for userID, client := range clients {
-		if userID == excludeUserID {
-			continue
-		}
-		// Note: In a real implementation, you'd check if user is in the room
-		// For now, broadcast to all except sender
-		event := SSEEvent{
-			Type:      eventType,
-			Data:      data,
-			Timestamp: time.Now().Unix(),
-		}
-
-		jsonData, _ := json.Marshal(event)
-		fmt.Fprintf(client.Writer, "event: %s\n", eventType)
-		fmt.Fprintf(client.Writer, "data: %s\n\n", jsonData)
-		client.Flusher.Flush()
+	if _, err := fmt.Fprintf(client.Writer, "data: %s\n\n", payload); err != nil {
+		return err
 	}
+
+	client.Flusher.Flush()
+	return nil
 }
 
 // handleSSE handles Server-Sent Events connections
@@ -173,8 +207,9 @@ func (a *App) handleSSE(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("SSE connected for user: %s\n", userID)
 
 	// Send initial connection event
-	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\"}\n\n")
-	flusher.Flush()
+	if err := a.sseManager.SendToClient(userID, EventConnected, map[string]string{"status": "connected"}); err != nil {
+		fmt.Printf("Failed to send initial SSE event for user %s: %v\n", userID, err)
+	}
 
 	// Handle connection cleanup
 	defer func() {
@@ -182,16 +217,18 @@ func (a *App) handleSSE(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("SSE disconnected for user: %s\n", userID)
 	}()
 
-	// Keep connection alive
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		default:
-			// Send heartbeat every 30 seconds to keep connection alive
-			time.Sleep(30 * time.Second)
-			fmt.Fprintf(w, "event: heartbeat\ndata: {\"timestamp\":%d}\n\n", time.Now().Unix())
-			flusher.Flush()
+		case <-ticker.C:
+			if err := a.sseManager.SendHeartbeat(userID); err != nil {
+				fmt.Printf("Heartbeat send failed for user %s: %v\n", userID, err)
+				return
+			}
 		}
 	}
 }
