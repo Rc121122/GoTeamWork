@@ -18,6 +18,10 @@ export function GetChatHistory(arg1) {
   return window['go']['main']['App']['GetChatHistory'](arg1);
 }
 
+export function GetClipboardItem() {
+  return window['go']['main']['App']['GetClipboardItem']();
+}
+
 export function GetConnectionStatus() {
   return window['go']['main']['App']['GetConnectionStatus']();
 }
@@ -52,6 +56,10 @@ export function ListAllUsers() {
 
 export function SendChatMessage(arg1, arg2, arg3) {
   return window['go']['main']['App']['SendChatMessage'](arg1, arg2, arg3);
+}
+
+export function StartClipboardMonitor() {
+  return window['go']['main']['App']['StartClipboardMonitor']();
 }
 
 export function StartHTTPServer(arg1) {

@@ -36,7 +36,6 @@ Tree Structure, 3 main modules:
 
 - Week 2 (11/11):
   1. Central-server features - Assigned to mr.Lin
-     - Add password auth for rooms + secure storage
      - Implement SSE for real-time invite notifications
   2. Clipboard & hotkeys - Assigned to mr.Chang
      - OS clipboard permissions check + request

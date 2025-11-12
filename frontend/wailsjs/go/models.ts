@@ -22,6 +22,22 @@ export namespace main {
 	        this.timestamp = source["timestamp"];
 	    }
 	}
+	export class ClipboardItem {
+	    type: string;
+	    text?: string;
+	    image?: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ClipboardItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.text = source["text"];
+	        this.image = source["image"];
+	    }
+	}
 	export class Room {
 	    id: string;
 	    name: string;

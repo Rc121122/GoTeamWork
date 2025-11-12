@@ -11,7 +11,7 @@ import {
   httpLeaveRoom,
   httpSendChatMessage,
 } from "./api/httpClient";
-import type { ChatMessage, InviteEventPayload, User } from "./api/types";
+import type { ChatMessage, CopiedItem, InviteEventPayload, User } from "./api/types";
 
 export function renderClientUI(): void {
   renderUsernameInput();
@@ -73,6 +73,7 @@ function renderUsernameInput(): void {
         },
         onUserInvited: handleInvite,
         onChatMessage: renderRoomChatMessage,
+        onClipboardCopied: handleClipboardCopied,
         onDisconnected: () => {
           console.warn("SSE connection lost; attempting to reconnect");
         },
@@ -115,6 +116,33 @@ function handleInvite(payload: InviteEventPayload): void {
     (modal as HTMLElement).style.display = "none";
     void leaveRoom();
   };
+}
+
+function handleClipboardCopied(item: CopiedItem): void {
+  const notification = document.getElementById("notification");
+  if (!notification) {
+    return;
+  }
+
+  let message = "";
+  switch (item.type) {
+    case "text":
+      message = "Text copied to shareboard!";
+      break;
+    case "image":
+      message = "Image copied to shareboard!";
+      break;
+    default:
+      message = "Item copied to shareboard!";
+  }
+
+  notification.textContent = message;
+  notification.style.display = "block";
+
+  // Hide after 3 seconds
+  setTimeout(() => {
+    notification.style.display = "none";
+  }, 3000);
 }
 
 function renderWaitingLobby(): void {

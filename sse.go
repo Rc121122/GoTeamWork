@@ -12,14 +12,15 @@ import (
 type SSEEventType string
 
 const (
-	EventConnected   SSEEventType = "connected"
-	EventUserCreated SSEEventType = "user_created"
-	EventUserLeft    SSEEventType = "user_left"
-	EventRoomCreated SSEEventType = "room_created"
-	EventRoomDeleted SSEEventType = "room_deleted"
-	EventUserInvited SSEEventType = "user_invited"
-	EventChatMessage SSEEventType = "chat_message"
-	EventHeartbeat   SSEEventType = "heartbeat"
+	EventConnected       SSEEventType = "connected"
+	EventUserCreated     SSEEventType = "user_created"
+	EventUserLeft        SSEEventType = "user_left"
+	EventRoomCreated     SSEEventType = "room_created"
+	EventRoomDeleted     SSEEventType = "room_deleted"
+	EventUserInvited     SSEEventType = "user_invited"
+	EventChatMessage     SSEEventType = "chat_message"
+	EventHeartbeat       SSEEventType = "heartbeat"
+	EventClipboardCopied SSEEventType = "clipboard_copied"
 )
 
 // SSEEvent represents a server-sent event

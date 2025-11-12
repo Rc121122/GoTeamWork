@@ -58,4 +58,10 @@ export interface CreateRoomRequest {
   name: string;
 }
 
+export interface CopiedItem {
+  type: "text" | "image";
+  text?: string;
+  image?: string; // base64 encoded
+}
+
 export type AppMode = "host" | "client";

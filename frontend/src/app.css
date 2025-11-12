@@ -108,7 +108,7 @@
 }
 
 .user-list {
-    max-width: 600px;
+    width: 100%;
     margin: 0 auto;
 }
 
@@ -702,4 +702,34 @@ h2 {
 
 .room-controls {
     margin-bottom: 1rem;
+}
+
+/* Notification Styles */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: #4CAF50;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 5px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    font-weight: bold;
+    animation: slideIn 0.3s ease-out;
+}
+
+.notification.error {
+    background: #f44336;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
 }

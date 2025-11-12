@@ -1,6 +1,7 @@
 import { globalState } from "./state";
 import type {
   ChatMessage,
+  CopiedItem,
   InviteEventPayload,
   SSEEnvelope,
   User,
@@ -12,6 +13,7 @@ interface SSEHandlers {
   onUserCreated?: (user: User) => void;
   onUserInvited?: (payload: InviteEventPayload) => void;
   onChatMessage?: (message: ChatMessage) => void;
+  onClipboardCopied?: (item: CopiedItem) => void;
   onDisconnected?: () => void;
 }
 
@@ -37,6 +39,10 @@ export function connectSSE(userId: string, handlers: SSEHandlers): void {
 
     source.addEventListener("chat_message", (event) => {
       handlers.onChatMessage?.(parseEnvelope<ChatMessage>(event as MessageEvent<string>));
+    });
+
+    source.addEventListener("clipboard_copied", (event) => {
+      handlers.onClipboardCopied?.(parseEnvelope<CopiedItem>(event as MessageEvent<string>));
     });
 
     source.addEventListener("connected", () => {

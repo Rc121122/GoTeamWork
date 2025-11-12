@@ -129,6 +129,9 @@ func (a *App) startup(ctx context.Context) {
 			fmt.Println("Connected to central server and started auto-sync")
 		}
 	}
+
+	// Start clipboard monitoring for copy hotkey
+	a.StartClipboardMonitor()
 }
 
 // Greet returns a greeting for the given name
