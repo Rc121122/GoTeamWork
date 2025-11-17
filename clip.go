@@ -18,9 +18,9 @@ const (
 
 // ClipboardItem represents a clipboard item with its content
 type ClipboardItem struct {
-	Type     ClipboardItemType `json:"type"`
-	Text     string            `json:"text,omitempty"`
-	Image    []byte            `json:"image,omitempty"` // PNG encoded
+	Type  ClipboardItemType `json:"type"`
+	Text  string            `json:"text,omitempty"`
+	Image []byte            `json:"image,omitempty"` // PNG encoded
 }
 
 // ReadClipboard reads the current clipboard content and returns a ClipboardItem
@@ -95,7 +95,7 @@ var addEvent = func(keys ...string) bool {
 	return false
 }
 
-// StartClipboardHotkey listens for Cmd+Shift+C (macOS) global hotkey.
+// StartClipboardHotkey listens for Cmd+Shift+C (macOS) Ctrl + Shift + C (Win/Linux) global hotkey.
 // When the hotkey is detected, it reads the system clipboard and invokes cb with the ClipboardItem.
 // The function runs until the provided context is cancelled.
 func StartClipboardHotkey(ctx context.Context, cb func(*ClipboardItem)) error {
@@ -104,18 +104,27 @@ func StartClipboardHotkey(ctx context.Context, cb func(*ClipboardItem)) error {
 		return fmt.Errorf("failed to init clipboard: %w", err)
 	}
 
+	// Hotkey array includes both Cmd+Shift+C (macOS) and Ctrl+Shift+C (Win/Linux).
+	allKeys := []string{"c", "cmd", "shift", "c", "ctrl", "shift"}
+
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				// Block until the hotkey is pressed. On macOS, use "cmd" + "shift" + "c" keys.
+				// Block until the hotkey is pressed.
+				// The listener is configured for Cmd + Shift + C OR Ctrl + Shift + C.
 				// addEvent returns true when the key combination is detected.
-				if addEvent("c", "cmd", "shift") {
+
+				if addEvent(allKeys...) {
 					// Read clipboard and invoke callback
 					item, err := ReadClipboard()
-					if err == nil && item != nil {
+
+					// add hotkey event error handling
+					if err != nil {
+						fmt.Printf("Warning: Failed to read clipboard after hotkey: %v\n", err)
+					} else if item != nil {
 						cb(item)
 					}
 					// Small debounce to avoid multiple rapid triggers
@@ -135,4 +144,3 @@ func StartClipboardHotkey(ctx context.Context, cb func(*ClipboardItem)) error {
 func (a *App) GetClipboardItem() (*ClipboardItem, error) {
 	return ReadClipboard()
 }
-
