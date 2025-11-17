@@ -8,54 +8,132 @@ import (
 	"time"
 )
 
-// NewChatPool creates a new chat pool
-func NewChatPool() *ChatPool {
-	return &ChatPool{
-		messages: make(map[string][]*ChatMessage),
-		counter:  0,
+// NewHistoryPool creates a new history pool
+func NewHistoryPool() *HistoryPool {
+	return &HistoryPool{
+		operations: make(map[string][]*Operation),
+		counter:    0,
 	}
 }
 
-// AddMessage adds a message to the chat pool
-func (cp *ChatPool) AddMessage(roomID, userID, userName, message string) *ChatMessage {
-	cp.mu.Lock()
-	defer cp.mu.Unlock()
+// AddOperation adds an operation to the history pool
+func (hp *HistoryPool) AddOperation(roomID string, opType OperationType, itemID string, item *Item) *Operation {
+	hp.mu.Lock()
+	defer hp.mu.Unlock()
 
-	cp.counter++
-	msg := &ChatMessage{
-		ID:        fmt.Sprintf("msg_%d", cp.counter),
-		RoomID:    roomID,
-		UserID:    userID,
-		UserName:  userName,
-		Message:   message,
+	hp.counter++
+	id := fmt.Sprintf("op_%d", hp.counter)
+
+	// Find the last operation ID for parent
+	var parentID string
+	if ops, exists := hp.operations[roomID]; exists && len(ops) > 0 {
+		parentID = ops[len(ops)-1].ID
+	}
+
+	op := &Operation{
+		ID:        id,
+		ParentID:  parentID,
+		OpType:    opType,
+		ItemID:    itemID,
+		Item:      item,
 		Timestamp: time.Now().Unix(),
 	}
 
-	cp.messages[roomID] = append(cp.messages[roomID], msg)
-	return msg
+	hp.operations[roomID] = append(hp.operations[roomID], op)
+	return op
 }
 
-// GetMessages returns all messages for a room
-func (cp *ChatPool) GetMessages(roomID string) []*ChatMessage {
-	cp.mu.RLock()
-	defer cp.mu.RUnlock()
+// GetOperations returns all operations for a room since a given operation ID
+func (hp *HistoryPool) GetOperations(roomID, sinceID string) []*Operation {
+	hp.mu.RLock()
+	defer hp.mu.RUnlock()
 
-	messages := cp.messages[roomID]
-	if messages == nil {
-		return []*ChatMessage{}
+	ops := hp.operations[roomID]
+	if ops == nil {
+		return []*Operation{}
 	}
 
-	// Return a copy to prevent external modification
-	result := make([]*ChatMessage, len(messages))
-	copy(result, messages)
+	if sinceID == "" {
+		// Return all
+		result := make([]*Operation, len(ops))
+		copy(result, ops)
+		return result
+	}
+
+	// Find index of sinceID
+	startIdx := -1
+	for i, op := range ops {
+		if op.ID == sinceID {
+			startIdx = i + 1
+			break
+		}
+	}
+
+	if startIdx == -1 || startIdx >= len(ops) {
+		return []*Operation{}
+	}
+
+	result := make([]*Operation, len(ops)-startIdx)
+	copy(result, ops[startIdx:])
 	return result
 }
 
-// ClearRoomMessages clears all messages for a room
-func (cp *ChatPool) ClearRoomMessages(roomID string) {
-	cp.mu.Lock()
-	defer cp.mu.Unlock()
-	delete(cp.messages, roomID)
+// GetCurrentChatMessages returns current chat messages by applying operations
+func (hp *HistoryPool) GetCurrentChatMessages(roomID string) []*ChatMessage {
+	hp.mu.RLock()
+	defer hp.mu.RUnlock()
+
+	ops := hp.operations[roomID]
+	messages := make(map[string]*ChatMessage)
+
+	for _, op := range ops {
+		if op.Item != nil && op.Item.Type == ItemChat {
+			if op.OpType == OpAdd {
+				if msg, ok := op.Item.Data.(*ChatMessage); ok {
+					messages[op.ItemID] = msg
+				}
+			} else if op.OpType == OpRemove {
+				delete(messages, op.ItemID)
+			}
+		}
+	}
+
+	result := make([]*ChatMessage, 0, len(messages))
+	for _, msg := range messages {
+		result = append(result, msg)
+	}
+
+	// Sort by timestamp
+	// Assuming IDs are sequential, but to be safe, sort
+	// For now, assume order is preserved
+	return result
+}
+
+// GetCurrentClipboardItems returns current clipboard items
+func (hp *HistoryPool) GetCurrentClipboardItems(roomID string) []*ClipboardItem {
+	hp.mu.RLock()
+	defer hp.mu.RUnlock()
+
+	ops := hp.operations[roomID]
+	items := make(map[string]*ClipboardItem)
+
+	for _, op := range ops {
+		if op.Item != nil && op.Item.Type == ItemClipboard {
+			if op.OpType == OpAdd {
+				if item, ok := op.Item.Data.(*ClipboardItem); ok {
+					items[op.ItemID] = item
+				}
+			} else if op.OpType == OpRemove {
+				delete(items, op.ItemID)
+			}
+		}
+	}
+
+	result := make([]*ClipboardItem, 0, len(items))
+	for _, item := range items {
+		result = append(result, item)
+	}
+	return result
 }
 
 // App struct
@@ -67,7 +145,7 @@ type App struct {
 	currentUser   *User
 	currentRoom   *Room
 	roomCounter   int
-	chatPool      *ChatPool
+	historyPool   *HistoryPool
 	mu            sync.RWMutex
 	networkClient *NetworkClient // For client mode
 	sseManager    *SSEManager    // For SSE events
@@ -76,11 +154,11 @@ type App struct {
 // NewApp creates a new App application struct
 func NewApp(mode string) *App {
 	app := &App{
-		Mode:       mode,
-		users:      make(map[string]*User),
-		rooms:      make(map[string]*Room),
-		chatPool:   NewChatPool(),
-		sseManager: NewSSEManager(),
+		Mode:        mode,
+		users:       make(map[string]*User),
+		rooms:       make(map[string]*Room),
+		historyPool: NewHistoryPool(),
+		sseManager:  NewSSEManager(),
 	}
 
 	// Initialize with a default current user for host mode
@@ -385,14 +463,31 @@ func (a *App) SendChatMessage(roomID, userID, message string) string {
 		return "Error: User is not in this room"
 	}
 
-	// Add message to chat pool
-	chatMsg := a.chatPool.AddMessage(roomID, userID, userName, message)
+	// Create chat message
+	msg := &ChatMessage{
+		ID:        fmt.Sprintf("msg_%d", time.Now().UnixNano()), // unique ID
+		RoomID:    roomID,
+		UserID:    userID,
+		UserName:  userName,
+		Message:   message,
+		Timestamp: time.Now().Unix(),
+	}
+
+	// Create item
+	item := &Item{
+		ID:   msg.ID,
+		Type: ItemChat,
+		Data: msg,
+	}
+
+	// Add operation
+	op := a.historyPool.AddOperation(roomID, OpAdd, msg.ID, item)
 
 	// Notify via SSE
-	a.sseManager.BroadcastToUsers(members, EventChatMessage, chatMsg, userID)
+	a.sseManager.BroadcastToUsers(members, EventChatMessage, op, userID)
 
 	fmt.Printf("Chat message from %s in room %s: %s\n", userName, roomID, message)
-	return fmt.Sprintf("Message sent: %s", chatMsg.ID)
+	return fmt.Sprintf("Message sent: %s", msg.ID)
 }
 
 // GetChatHistory returns chat history for a room
@@ -405,7 +500,22 @@ func (a *App) GetChatHistory(roomID string) []*ChatMessage {
 		return []*ChatMessage{}
 	}
 
-	return a.chatPool.GetMessages(roomID)
+	return a.historyPool.GetCurrentChatMessages(roomID)
+}
+
+// GetOperations returns operations for a room since a given ID
+func (a *App) GetOperations(roomID, sinceID string) []*Operation {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	// For global clipboard, allow roomID == "global"
+	if roomID != "global" {
+		if _, exists := a.rooms[roomID]; !exists {
+			return []*Operation{}
+		}
+	}
+
+	return a.historyPool.GetOperations(roomID, sinceID)
 }
 
 // StartHTTPServer starts the HTTP server for REST API
@@ -416,6 +526,7 @@ func (a *App) StartHTTPServer(port string) {
 	http.HandleFunc("/api/invite", a.handleInvite)
 	http.HandleFunc("/api/chat", a.handleChat)
 	http.HandleFunc("/api/chat/", a.handleChat)
+	http.HandleFunc("/api/operations/", a.handleOperations)
 	http.HandleFunc("/api/leave", a.handleLeave)
 	http.HandleFunc("/api/sse", a.handleSSE)
 

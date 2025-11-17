@@ -34,6 +34,47 @@ type ChatPool struct {
 	mu       sync.RWMutex
 }
 
+// OperationType represents the type of operation
+type OperationType string
+
+const (
+	OpAdd    OperationType = "add"
+	OpRemove OperationType = "remove"
+	OpModify OperationType = "modify"
+)
+
+// ItemType represents the type of item
+type ItemType string
+
+const (
+	ItemChat      ItemType = "chat"
+	ItemClipboard ItemType = "clipboard"
+)
+
+// Item represents a data item in the history
+type Item struct {
+	ID   string      `json:"id"`
+	Type ItemType    `json:"type"`
+	Data interface{} `json:"data"` // ChatMessage or ClipboardItem
+}
+
+// Operation represents a git-style operation on the history
+type Operation struct {
+	ID        string        `json:"id"`
+	ParentID  string        `json:"parentId"`
+	OpType    OperationType `json:"opType"`
+	ItemID    string        `json:"itemId"`
+	Item      *Item         `json:"item,omitempty"`
+	Timestamp int64         `json:"timestamp"`
+}
+
+// HistoryPool manages operations for all rooms
+type HistoryPool struct {
+	operations map[string][]*Operation // roomID -> operations
+	counter    int
+	mu         sync.RWMutex
+}
+
 // HTTP Request/Response Types
 type CreateUserRequest struct {
 	Name string `json:"name"`

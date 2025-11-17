@@ -18,6 +18,8 @@ export function GetCurrentRoom():Promise<main.Room>;
 
 export function GetMode():Promise<string>;
 
+export function GetOperations(arg1:string,arg2:string):Promise<Array<main.Operation>>;
+
 export function GetServerUsers():Promise<Array<main.User>>;
 
 export function Greet(arg1:string):Promise<string>;

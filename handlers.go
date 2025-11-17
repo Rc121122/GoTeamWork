@@ -225,3 +225,37 @@ func (a *App) handleLeave(w http.ResponseWriter, r *http.Request) {
 	response := APIResponse{Message: result}
 	json.NewEncoder(w).Encode(response)
 }
+
+// handleOperations handles GET /api/operations/{roomId}?since={operationId}
+func (a *App) handleOperations(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract room ID from URL path
+	path := r.URL.Path
+	roomID := ""
+	if len(path) > len("/api/operations/") {
+		roomID = path[len("/api/operations/"):]
+	}
+
+	if roomID == "" {
+		http.Error(w, "Room ID is required", http.StatusBadRequest)
+		return
+	}
+
+	sinceID := r.URL.Query().Get("since")
+
+	operations := a.GetOperations(roomID, sinceID)
+	json.NewEncoder(w).Encode(operations)
+}

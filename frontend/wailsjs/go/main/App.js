@@ -34,6 +34,10 @@ export function GetMode() {
   return window['go']['main']['App']['GetMode']();
 }
 
+export function GetOperations(arg1, arg2) {
+  return window['go']['main']['App']['GetOperations'](arg1, arg2);
+}
+
 export function GetServerUsers() {
   return window['go']['main']['App']['GetServerUsers']();
 }
