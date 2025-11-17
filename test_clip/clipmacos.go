@@ -20,9 +20,9 @@ const (
 
 // ClipboardItem represents a clipboard item with its content
 type ClipboardItem struct {
-	Type     ClipboardItemType `json:"type"`
-	Text     string            `json:"text,omitempty"`
-	Image    []byte            `json:"image,omitempty"` // PNG encoded
+	Type  ClipboardItemType `json:"type"`
+	Text  string            `json:"text,omitempty"`
+	Image []byte            `json:"image,omitempty"` // PNG encoded
 }
 
 // ReadClipboard reads the current clipboard content and returns a ClipboardItem
@@ -56,10 +56,29 @@ func ReadClipboard() (*ClipboardItem, error) {
 func main() {
 	fmt.Println("Welcome to clipboard testing for MacOS, waiting for response, press \"Cmd+Shift+C\" to copy here.")
 
-	// Watch for clipboard changes
-	ch := clipboard.Watch(context.Background(), clipboard.FmtText)
-	for data := range ch {
-		text := string(data)
-		fmt.Printf("You copied: %s\n", text)
+	ctx := context.Background()
+
+	// Watch for text changes
+	chText := clipboard.Watch(ctx, clipboard.FmtText)
+
+	// Watch for image changes
+	chImage := clipboard.Watch(ctx, clipboard.FmtImage)
+
+	for {
+		select {
+		case data := <-chText:
+			if filePaths := getFilePathsFromPasteboard(); len(filePaths) > 0 {
+				for _, path := range filePaths {
+					fmt.Printf("You copied file: %s\n", path)
+				}
+				continue
+			}
+			text := string(data)
+			fmt.Printf("You copied: %s\n", text)
+		case data := <-chImage:
+			if len(data) > 0 {
+				fmt.Println("You copied an image")
+			}
+		}
 	}
 }
