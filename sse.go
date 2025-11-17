@@ -18,6 +18,7 @@ const (
 	EventRoomCreated     SSEEventType = "room_created"
 	EventRoomDeleted     SSEEventType = "room_deleted"
 	EventUserInvited     SSEEventType = "user_invited"
+	EventUserJoined      SSEEventType = "user_joined"
 	EventChatMessage     SSEEventType = "chat_message"
 	EventHeartbeat       SSEEventType = "heartbeat"
 	EventClipboardCopied SSEEventType = "clipboard_copied"

@@ -8,6 +8,7 @@ import {
   httpFetchChatHistory,
   httpFetchUsers,
   httpInviteUser,
+  httpJoinRoom,
   httpLeaveRoom,
   httpSendChatMessage,
 } from "./api/httpClient";
@@ -72,6 +73,7 @@ function renderUsernameInput(): void {
           void updateUserList();
         },
         onUserInvited: handleInvite,
+        onUserJoined: handleUserJoined,
         onChatMessage: renderRoomChatMessage,
         onClipboardCopied: handleClipboardCopied,
         onDisconnected: () => {
@@ -92,6 +94,20 @@ function renderUsernameInput(): void {
 }
 
 function handleInvite(payload: InviteEventPayload): void {
+  console.log("Received invite event:", payload);
+  
+  // If inviter is "Self", this user sent the invite - auto-join
+  if (payload.inviter === "Self") {
+    console.log("Auto-joining room as inviter:", payload.roomId);
+    if (globalState.currentUser) {
+      globalState.currentUser.roomId = payload.roomId;
+    }
+    renderRoomView();
+    return;
+  }
+
+  // Otherwise, show invite modal for the invitee
+  console.log("Showing invite modal for invitee");
   const modal = document.getElementById("invite-modal");
   const acceptBtn = document.getElementById("accept-invite");
   const declineBtn = document.getElementById("decline-invite");
@@ -108,6 +124,8 @@ function handleInvite(payload: InviteEventPayload): void {
     (modal as HTMLElement).style.display = "none";
     if (globalState.currentUser) {
       globalState.currentUser.roomId = payload.roomId;
+      // Notify the server that this user has joined the room
+      void joinRoom(globalState.currentUser.id, payload.roomId);
     }
     renderRoomView();
   };
@@ -116,6 +134,16 @@ function handleInvite(payload: InviteEventPayload): void {
     (modal as HTMLElement).style.display = "none";
     void leaveRoom();
   };
+}
+
+function handleUserJoined(payload: { roomId: string; roomName: string; userId: string; userName: string }): void {
+  console.log("User joined event:", payload);
+  
+  // If this event is for our current room, refresh the view or show notification
+  if (globalState.currentUser?.roomId === payload.roomId) {
+    console.log(`${payload.userName} joined the room!`);
+    // You could show a notification here or update a user list in the room
+  }
 }
 
 function handleClipboardCopied(item: CopiedItem): void {
@@ -217,13 +245,44 @@ function renderUserList(users: User[]): void {
 }
 
 async function inviteUser(userId: string, userName: string): Promise<void> {
+  const currentUser = globalState.currentUser;
+  if (!currentUser) {
+    window.alert("You must be logged in to invite users");
+    return;
+  }
+
+  console.log(`Inviting user ${userName} (${userId}) from ${currentUser.name} (${currentUser.id})`);
+
   try {
-    const response = await httpInviteUser({ userId });
+    const response = await httpInviteUser({ 
+      userId,
+      inviterId: currentUser.id 
+    });
+    
+    console.log(`Invite response:`, response);
+    
+    // If roomId is returned, update current user and render room view
+    if (response.roomId) {
+      console.log(`Updating currentUser.roomId to ${response.roomId}`);
+      globalState.currentUser = { ...currentUser, roomId: response.roomId };
+      console.log(`Waiting for SSE event to render room view...`);
+      // Note: We'll receive SSE event to actually render the room
+      // The SSE event handler will call renderRoomView()
+    }
+    
     window.alert(response.message);
-    console.log(`Invited ${userName}: ${response.message}`);
   } catch (error) {
     console.error("Error inviting user", error);
     window.alert("Failed to send invitation");
+  }
+}
+
+async function joinRoom(userId: string, roomId: string): Promise<void> {
+  try {
+    const response = await httpJoinRoom({ userId, roomId });
+    console.log("Join room response:", response);
+  } catch (error) {
+    console.error("Error joining room", error);
   }
 }
 

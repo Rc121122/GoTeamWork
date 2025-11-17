@@ -22,6 +22,7 @@ export interface ChatMessage {
 
 export interface ApiMessageResponse {
   message: string;
+  roomId?: string;
 }
 
 export interface InviteEventPayload {
@@ -42,6 +43,7 @@ export interface CreateUserRequest {
 
 export interface InviteUserRequest {
   userId: string;
+  inviterId: string;
 }
 
 export interface ChatMessageRequest {
@@ -52,6 +54,11 @@ export interface ChatMessageRequest {
 
 export interface LeaveRoomRequest {
   userId: string;
+}
+
+export interface JoinRoomRequest {
+  userId: string;
+  roomId: string;
 }
 
 export interface CreateRoomRequest {

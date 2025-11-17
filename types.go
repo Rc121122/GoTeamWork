@@ -81,7 +81,8 @@ type CreateUserRequest struct {
 }
 
 type InviteUserRequest struct {
-	UserID string `json:"userId"`
+	UserID    string `json:"userId"`
+	InviterID string `json:"inviterId"` // The user who is sending the invite
 }
 
 type ChatMessageRequest struct {
@@ -94,10 +95,16 @@ type LeaveRoomRequest struct {
 	UserID string `json:"userId"`
 }
 
+type JoinRoomRequest struct {
+	UserID string `json:"userId"`
+	RoomID string `json:"roomId"`
+}
+
 type CreateRoomRequest struct {
 	Name string `json:"name"`
 }
 
 type APIResponse struct {
 	Message string `json:"message"`
+	RoomID  string `json:"roomId,omitempty"` // Room ID if applicable
 }

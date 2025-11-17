@@ -300,6 +300,95 @@ func (a *App) CreateRoom(name string) *Room {
 	return room
 }
 
+// InviteWithRoom invites a user to a room, creating one if needed
+// This is used in client mode where users can invite each other
+func (a *App) InviteWithRoom(inviteeID, inviterID string) (string, string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Check if invitee exists
+	invitee, exists := a.users[inviteeID]
+	if !exists {
+		return "", "Error: Invitee not found"
+	}
+
+	// Check if inviter exists
+	inviter, exists := a.users[inviterID]
+	if !exists {
+		return "", "Error: Inviter not found"
+	}
+
+	// Get or create room for inviter
+	var room *Room
+	inviterJustJoined := false
+
+	if inviter.RoomID != nil {
+		// Inviter already has a room
+		room = a.rooms[*inviter.RoomID]
+		fmt.Printf("Inviter %s already in room %s\n", inviterID, room.ID)
+	} else {
+		// Create new room
+		a.roomCounter++
+		roomID := fmt.Sprintf("room_%d", a.roomCounter)
+		room = &Room{
+			ID:      roomID,
+			Name:    fmt.Sprintf("Room %d", a.roomCounter),
+			UserIDs: []string{},
+		}
+		a.rooms[roomID] = room
+
+		// Add inviter to the room
+		room.UserIDs = append(room.UserIDs, inviterID)
+		inviter.RoomID = &room.ID
+		inviterJustJoined = true
+
+		fmt.Printf("Created new room %s for inviter %s\n", room.ID, inviterID)
+	}
+
+	// Always notify inviter to ensure they see the room view
+	// This is critical for the first invite when the inviter creates the room
+	if inviterJustJoined {
+		inviteData := map[string]interface{}{
+			"roomId":   room.ID,
+			"roomName": room.Name,
+			"inviter":  "Self", // This tells the inviter's frontend to auto-join
+		}
+
+		fmt.Printf("DEBUG: About to send SSE to inviter %s\n", inviterID)
+		fmt.Printf("DEBUG: Invite data: %+v\n", inviteData)
+
+		if err := a.sseManager.SendToClient(inviterID, EventUserInvited, inviteData); err != nil {
+			fmt.Printf("ERROR: Failed to send invite event to inviter %s: %v\n", inviterID, err)
+		} else {
+			fmt.Printf("SUCCESS: Sent SSE 'Self' invite to inviter %s for room %s\n", inviterID, room.ID)
+		}
+	}
+
+	// Add invitee to room if not already there
+	if !contains(room.UserIDs, inviteeID) {
+		room.UserIDs = append(room.UserIDs, inviteeID)
+		invitee.RoomID = &room.ID
+
+		// Notify the invitee via SSE
+		inviteData := map[string]interface{}{
+			"roomId":   room.ID,
+			"roomName": room.Name,
+			"inviter":  inviter.Name,
+		}
+
+		fmt.Printf("DEBUG: About to send SSE to invitee %s\n", inviteeID)
+		fmt.Printf("DEBUG: Invite data: %+v\n", inviteData)
+
+		if err := a.sseManager.SendToClient(inviteeID, EventUserInvited, inviteData); err != nil {
+			fmt.Printf("ERROR: Failed to send invite event to invitee %s: %v\n", inviteeID, err)
+		} else {
+			fmt.Printf("SUCCESS: Sent SSE invite to invitee %s for room %s\n", inviteeID, room.ID)
+		}
+	}
+
+	return room.ID, fmt.Sprintf("Successfully invited %s to room %s", invitee.Name, room.Name)
+}
+
 // Helper function to check if slice contains string
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
@@ -429,6 +518,52 @@ func (a *App) LeaveRoom(userID string) string {
 	return fmt.Sprintf("%s left room %s", user.Name, room.Name)
 }
 
+// JoinRoom adds a user to a room and notifies all room members
+func (a *App) JoinRoom(userID, roomID string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	user, exists := a.users[userID]
+	if !exists {
+		return "Error: User not found"
+	}
+
+	room, exists := a.rooms[roomID]
+	if !exists {
+		return "Error: Room not found"
+	}
+
+	// Check if user is already in the room
+	if contains(room.UserIDs, userID) {
+		fmt.Printf("User %s already in room %s\n", userID, roomID)
+		return fmt.Sprintf("%s is already in room %s", user.Name, room.Name)
+	}
+
+	// Add user to room
+	room.UserIDs = append(room.UserIDs, userID)
+	user.RoomID = &room.ID
+
+	fmt.Printf("User %s joined room %s\n", userID, roomID)
+
+	// Notify all users in the room that someone joined
+	joinData := map[string]interface{}{
+		"roomId":   room.ID,
+		"roomName": room.Name,
+		"userId":   userID,
+		"userName": user.Name,
+	}
+
+	for _, memberID := range room.UserIDs {
+		if err := a.sseManager.SendToClient(memberID, EventUserJoined, joinData); err != nil {
+			fmt.Printf("ERROR: Failed to send join event to %s: %v\n", memberID, err)
+		} else {
+			fmt.Printf("SUCCESS: Sent join notification to %s\n", memberID)
+		}
+	}
+
+	return fmt.Sprintf("%s joined room %s", user.Name, room.Name)
+}
+
 // SendChatMessage sends a chat message to a room
 func (a *App) SendChatMessage(roomID, userID, message string) string {
 	a.mu.RLock()
@@ -524,6 +659,7 @@ func (a *App) StartHTTPServer(port string) {
 	http.HandleFunc("/api/users/", a.handleUserByID)
 	http.HandleFunc("/api/rooms", a.handleRooms)
 	http.HandleFunc("/api/invite", a.handleInvite)
+	http.HandleFunc("/api/join", a.handleJoinRoom)
 	http.HandleFunc("/api/chat", a.handleChat)
 	http.HandleFunc("/api/chat/", a.handleChat)
 	http.HandleFunc("/api/operations/", a.handleOperations)

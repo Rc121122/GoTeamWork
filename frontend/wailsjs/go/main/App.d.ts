@@ -26,6 +26,10 @@ export function Greet(arg1:string):Promise<string>;
 
 export function Invite(arg1:string):Promise<string>;
 
+export function InviteWithRoom(arg1:string,arg2:string):Promise<string|string>;
+
+export function JoinRoom(arg1:string,arg2:string):Promise<string>;
+
 export function LeaveRoom(arg1:string):Promise<string>;
 
 export function ListAllUsers():Promise<Array<main.User>>;

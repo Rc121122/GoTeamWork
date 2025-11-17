@@ -154,8 +154,8 @@ func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := a.Invite(req.UserID)
-	response := APIResponse{Message: result}
+	roomID, result := a.InviteWithRoom(req.UserID, req.InviterID)
+	response := APIResponse{Message: result, RoomID: roomID}
 	json.NewEncoder(w).Encode(response)
 }
 
@@ -197,6 +197,33 @@ func (a *App) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+// handleJoinRoom handles POST /api/join
+func (a *App) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req JoinRoomRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	result := a.JoinRoom(req.UserID, req.RoomID)
+	response := APIResponse{Message: result, RoomID: req.RoomID}
+	json.NewEncoder(w).Encode(response)
 }
 
 // handleLeave handles POST /api/leave

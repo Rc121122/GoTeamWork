@@ -50,6 +50,14 @@ export function Invite(arg1) {
   return window['go']['main']['App']['Invite'](arg1);
 }
 
+export function InviteWithRoom(arg1, arg2) {
+  return window['go']['main']['App']['InviteWithRoom'](arg1, arg2);
+}
+
+export function JoinRoom(arg1, arg2) {
+  return window['go']['main']['App']['JoinRoom'](arg1, arg2);
+}
+
 export function LeaveRoom(arg1) {
   return window['go']['main']['App']['LeaveRoom'](arg1);
 }

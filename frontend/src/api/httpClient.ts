@@ -4,6 +4,7 @@ import type {
   ChatMessageRequest,
   CreateUserRequest,
   InviteUserRequest,
+  JoinRoomRequest,
   LeaveRoomRequest,
   User,
   Room,
@@ -47,6 +48,13 @@ export async function httpCreateUser(payload: CreateUserRequest): Promise<User> 
 
 export async function httpInviteUser(payload: InviteUserRequest): Promise<ApiMessageResponse> {
   return request<ApiMessageResponse>("/api/invite", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function httpJoinRoom(payload: JoinRoomRequest): Promise<ApiMessageResponse> {
+  return request<ApiMessageResponse>("/api/join", {
     method: "POST",
     body: JSON.stringify(payload),
   });

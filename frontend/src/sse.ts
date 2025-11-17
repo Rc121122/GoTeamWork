@@ -12,6 +12,7 @@ const API_BASE_URL = "http://localhost:8080";
 interface SSEHandlers {
   onUserCreated?: (user: User) => void;
   onUserInvited?: (payload: InviteEventPayload) => void;
+  onUserJoined?: (payload: { roomId: string; roomName: string; userId: string; userName: string }) => void;
   onChatMessage?: (message: ChatMessage) => void;
   onClipboardCopied?: (item: CopiedItem) => void;
   onDisconnected?: () => void;
@@ -34,7 +35,17 @@ export function connectSSE(userId: string, handlers: SSEHandlers): void {
     });
 
     source.addEventListener("user_invited", (event) => {
-      handlers.onUserInvited?.(parseEnvelope<InviteEventPayload>(event as MessageEvent<string>));
+      console.log("SSE user_invited event received:", event.data);
+      const payload = parseEnvelope<InviteEventPayload>(event as MessageEvent<string>);
+      console.log("Parsed invite payload:", payload);
+      handlers.onUserInvited?.(payload);
+    });
+
+    source.addEventListener("user_joined", (event) => {
+      console.log("SSE user_joined event received:", event.data);
+      const payload = parseEnvelope<{ roomId: string; roomName: string; userId: string; userName: string }>(event as MessageEvent<string>);
+      console.log("Parsed join payload:", payload);
+      handlers.onUserJoined?.(payload);
     });
 
     source.addEventListener("chat_message", (event) => {
