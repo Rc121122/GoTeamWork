@@ -20,8 +20,6 @@ export function GetMode():Promise<string>;
 
 export function GetOperations(arg1:string,arg2:string):Promise<Array<main.Operation>>;
 
-export function GetServerUsers():Promise<Array<main.User>>;
-
 export function Greet(arg1:string):Promise<string>;
 
 export function Invite(arg1:string):Promise<string>;
@@ -36,8 +34,8 @@ export function ListAllUsers():Promise<Array<main.User>>;
 
 export function SendChatMessage(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function ShareSystemClipboard():Promise<boolean>;
+
 export function StartClipboardMonitor():Promise<void>;
 
 export function StartHTTPServer(arg1:string):Promise<void>;
-
-export function SyncFromServer():Promise<void>;

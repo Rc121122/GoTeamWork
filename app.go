@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // NewHistoryPool creates a new history pool
@@ -149,7 +151,18 @@ type App struct {
 	mu            sync.RWMutex
 	networkClient *NetworkClient // For client mode
 	sseManager    *SSEManager    // For SSE events
+
+	clipboardMonitorOnce  sync.Once
+	clipboardHotkeyCancel context.CancelFunc
+	pendingClipboardMu    sync.Mutex
+	pendingClipboardItem  *ClipboardItem
+	pendingClipboardAt    time.Time
 }
+
+const (
+	wailsEventClipboardShowButton = "clipboard:show-share-button"
+	wailsEventClipboardPermission = "clipboard:permission-state"
+)
 
 // NewApp creates a new App application struct
 func NewApp(mode string) *App {
@@ -202,9 +215,7 @@ func (a *App) startup(ctx context.Context) {
 			fmt.Printf("Warning: Could not connect to server: %v\n", err)
 			fmt.Println("Please make sure the host is running in host mode")
 		} else {
-			// Start automatic sync every 10 seconds (reduced from 5)
-			a.networkClient.StartAutoSync(10 * time.Second)
-			fmt.Println("Connected to central server and started auto-sync")
+			fmt.Println("Connected to central server; streaming updates over SSE")
 		}
 	}
 
@@ -284,11 +295,16 @@ func (a *App) CreateRoom(name string) *Room {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	cleanName := sanitizeRoomName(name)
+	if cleanName == "" {
+		cleanName = fmt.Sprintf("Room %d", a.roomCounter+1)
+	}
+
 	a.roomCounter++
 	roomID := fmt.Sprintf("room_%d", a.roomCounter)
 	room := &Room{
 		ID:      roomID,
-		Name:    name,
+		Name:    cleanName,
 		UserIDs: []string{},
 	}
 	a.rooms[roomID] = room
@@ -320,14 +336,13 @@ func (a *App) InviteWithRoom(inviteeID, inviterID string) (string, string) {
 
 	// Get or create room for inviter
 	var room *Room
-	inviterJustJoined := false
-
 	if inviter.RoomID != nil {
-		// Inviter already has a room
-		room = a.rooms[*inviter.RoomID]
-		fmt.Printf("Inviter %s already in room %s\n", inviterID, room.ID)
-	} else {
-		// Create new room
+		if existing, ok := a.rooms[*inviter.RoomID]; ok {
+			room = existing
+		}
+	}
+
+	if room == nil {
 		a.roomCounter++
 		roomID := fmt.Sprintf("room_%d", a.roomCounter)
 		room = &Room{
@@ -336,57 +351,36 @@ func (a *App) InviteWithRoom(inviteeID, inviterID string) (string, string) {
 			UserIDs: []string{},
 		}
 		a.rooms[roomID] = room
-
-		// Add inviter to the room
-		room.UserIDs = append(room.UserIDs, inviterID)
-		inviter.RoomID = &room.ID
-		inviterJustJoined = true
-
 		fmt.Printf("Created new room %s for inviter %s\n", room.ID, inviterID)
 	}
 
-	// Always notify inviter to ensure they see the room view
-	// This is critical for the first invite when the inviter creates the room
-	if inviterJustJoined {
-		inviteData := map[string]interface{}{
-			"roomId":   room.ID,
-			"roomName": room.Name,
-			"inviter":  "Self", // This tells the inviter's frontend to auto-join
-		}
-
-		fmt.Printf("DEBUG: About to send SSE to inviter %s\n", inviterID)
-		fmt.Printf("DEBUG: Invite data: %+v\n", inviteData)
-
-		if err := a.sseManager.SendToClient(inviterID, EventUserInvited, inviteData); err != nil {
-			fmt.Printf("ERROR: Failed to send invite event to inviter %s: %v\n", inviterID, err)
-		} else {
-			fmt.Printf("SUCCESS: Sent SSE 'Self' invite to inviter %s for room %s\n", inviterID, room.ID)
-		}
+	if !contains(room.UserIDs, inviterID) {
+		room.UserIDs = append(room.UserIDs, inviterID)
+		inviter.RoomID = &room.ID
 	}
 
-	// Add invitee to room if not already there
-	if !contains(room.UserIDs, inviteeID) {
-		room.UserIDs = append(room.UserIDs, inviteeID)
-		invitee.RoomID = &room.ID
-
-		// Notify the invitee via SSE
-		inviteData := map[string]interface{}{
-			"roomId":   room.ID,
-			"roomName": room.Name,
-			"inviter":  inviter.Name,
-		}
-
-		fmt.Printf("DEBUG: About to send SSE to invitee %s\n", inviteeID)
-		fmt.Printf("DEBUG: Invite data: %+v\n", inviteData)
-
-		if err := a.sseManager.SendToClient(inviteeID, EventUserInvited, inviteData); err != nil {
-			fmt.Printf("ERROR: Failed to send invite event to invitee %s: %v\n", inviteeID, err)
-		} else {
-			fmt.Printf("SUCCESS: Sent SSE invite to invitee %s for room %s\n", inviteeID, room.ID)
-		}
+	// Tell the inviter's frontend to show the room immediately
+	selfPayload := map[string]interface{}{
+		"roomId":   room.ID,
+		"roomName": room.Name,
+		"inviter":  "Self",
+	}
+	if err := a.sseManager.SendToClient(inviterID, EventUserInvited, selfPayload); err != nil {
+		fmt.Printf("ERROR: Failed to send invite confirmation to inviter %s: %v\n", inviterID, err)
 	}
 
-	return room.ID, fmt.Sprintf("Successfully invited %s to room %s", invitee.Name, room.Name)
+	// Notify the invitee via SSE so they can accept/decline
+	invitePayload := map[string]interface{}{
+		"roomId":   room.ID,
+		"roomName": room.Name,
+		"inviter":  inviter.Name,
+	}
+	if err := a.sseManager.SendToClient(inviteeID, EventUserInvited, invitePayload); err != nil {
+		fmt.Printf("ERROR: Failed to deliver invite to %s: %v\n", inviteeID, err)
+		return room.ID, fmt.Sprintf("Invite queued for %s but SSE delivery failed", invitee.Name)
+	}
+
+	return room.ID, fmt.Sprintf("Invitation sent to %s for room %s", invitee.Name, room.Name)
 }
 
 // Helper function to check if slice contains string
@@ -399,16 +393,47 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
+func (a *App) emitClipboardPermissionEvent(granted bool, message string) {
+	if a.ctx == nil {
+		return
+	}
+
+	payload := map[string]interface{}{
+		"granted": granted,
+	}
+	if message != "" {
+		payload["message"] = message
+	}
+
+	runtime.EventsEmit(a.ctx, wailsEventClipboardPermission, payload)
+}
+
+func (a *App) emitClipboardButtonEvent(screenX, screenY int) {
+	if a.ctx == nil {
+		return
+	}
+
+	runtime.EventsEmit(a.ctx, wailsEventClipboardShowButton, map[string]int{
+		"screenX": screenX,
+		"screenY": screenY,
+	})
+}
+
 // CreateUser creates a new user in the system
 func (a *App) CreateUser(name string) *User {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	cleanName := sanitizeUserName(name)
+	if cleanName == "" {
+		cleanName = fmt.Sprintf("User %d", len(a.users)+1)
+	}
+
 	// Generate user ID based on current user count
 	userID := fmt.Sprintf("user_%d", len(a.users)+1)
 	user := &User{
 		ID:       userID,
-		Name:     name,
+		Name:     cleanName,
 		IsOnline: true,
 	}
 	a.users[userID] = user
@@ -452,22 +477,6 @@ func (a *App) GetConnectionStatus() bool {
 	return a.networkClient.IsConnected()
 }
 
-// SyncFromServer manually triggers a data sync from the server (client mode only)
-func (a *App) SyncFromServer() error {
-	if a.Mode != "client" || a.networkClient == nil {
-		return fmt.Errorf("sync only available in client mode")
-	}
-	return a.networkClient.SyncData()
-}
-
-// GetServerUsers fetches users from the server (client mode)
-func (a *App) GetServerUsers() ([]*User, error) {
-	if a.Mode != "client" || a.networkClient == nil {
-		return nil, fmt.Errorf("this function is only available in client mode")
-	}
-	return a.networkClient.FetchUsers()
-}
-
 // LeaveRoom removes a user from their current room
 // If room has less than 2 people after leaving, the room is deleted
 func (a *App) LeaveRoom(userID string) string {
@@ -498,12 +507,21 @@ func (a *App) LeaveRoom(userID string) string {
 
 	// Clear user's room reference
 	user.RoomID = nil
+	remainingMembers := append([]string{}, room.UserIDs...)
+
+	leavePayload := map[string]interface{}{
+		"roomId":   room.ID,
+		"roomName": room.Name,
+		"userId":   user.ID,
+		"userName": user.Name,
+	}
+	a.sseManager.BroadcastToUsers(remainingMembers, EventUserLeft, leavePayload, "")
 
 	// If room has less than 2 users, delete it
 	if len(room.UserIDs) < 2 {
 		delete(a.rooms, room.ID)
 		// Remove room reference from remaining users
-		for _, uid := range room.UserIDs {
+		for _, uid := range remainingMembers {
 			if u, exists := a.users[uid]; exists {
 				u.RoomID = nil
 			}
@@ -511,6 +529,14 @@ func (a *App) LeaveRoom(userID string) string {
 		// If this was the current room, clear it
 		if a.currentRoom != nil && a.currentRoom.ID == room.ID {
 			a.currentRoom = nil
+		}
+
+		if len(remainingMembers) > 0 {
+			roomPayload := map[string]interface{}{
+				"roomId":   room.ID,
+				"roomName": room.Name,
+			}
+			a.sseManager.BroadcastToUsers(remainingMembers, EventRoomDeleted, roomPayload, "")
 		}
 		return fmt.Sprintf("Room %s deleted: insufficient users after %s left", room.Name, user.Name)
 	}
@@ -598,13 +624,18 @@ func (a *App) SendChatMessage(roomID, userID, message string) string {
 		return "Error: User is not in this room"
 	}
 
+	safeMessage := sanitizeChatMessage(message)
+	if safeMessage == "" {
+		return "Error: Message cannot be empty"
+	}
+
 	// Create chat message
 	msg := &ChatMessage{
 		ID:        fmt.Sprintf("msg_%d", time.Now().UnixNano()), // unique ID
 		RoomID:    roomID,
 		UserID:    userID,
 		UserName:  userName,
-		Message:   message,
+		Message:   safeMessage,
 		Timestamp: time.Now().Unix(),
 	}
 
@@ -615,13 +646,11 @@ func (a *App) SendChatMessage(roomID, userID, message string) string {
 		Data: msg,
 	}
 
-	// Add operation
-	op := a.historyPool.AddOperation(roomID, OpAdd, msg.ID, item)
+	// Add operation and notify consumers about the delta (not the entire history)
+	a.historyPool.AddOperation(roomID, OpAdd, msg.ID, item)
+	a.sseManager.BroadcastToUsers(members, EventChatMessage, msg, userID)
 
-	// Notify via SSE
-	a.sseManager.BroadcastToUsers(members, EventChatMessage, op, userID)
-
-	fmt.Printf("Chat message from %s in room %s: %s\n", userName, roomID, message)
+	fmt.Printf("Chat message from %s in room %s: %s\n", userName, roomID, safeMessage)
 	return fmt.Sprintf("Message sent: %s", msg.ID)
 }
 

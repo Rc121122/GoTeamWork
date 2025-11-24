@@ -16,11 +16,6 @@ type NetworkClient struct {
 	httpClient *http.Client
 	connected  bool
 	mu         sync.RWMutex
-
-	// Local cache for fetched data
-	cachedUsers []*User
-	cachedRooms []*Room
-	lastSync    time.Time
 }
 
 // NewNetworkClient creates a new network client
@@ -30,9 +25,7 @@ func NewNetworkClient(serverURL string) *NetworkClient {
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
-		connected:   false,
-		cachedUsers: make([]*User, 0),
-		cachedRooms: make([]*Room, 0),
+		connected: false,
 	}
 }
 
@@ -64,70 +57,6 @@ func (n *NetworkClient) IsConnected() bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.connected
-}
-
-// FetchUsers retrieves all users from the server
-func (n *NetworkClient) FetchUsers() ([]*User, error) {
-	resp, err := n.httpClient.Get(n.serverURL + "/api/users")
-	if err != nil {
-		n.setDisconnected()
-		return nil, fmt.Errorf("failed to fetch users: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned status: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var users []*User
-	if err := json.Unmarshal(body, &users); err != nil {
-		return nil, fmt.Errorf("failed to parse users: %w", err)
-	}
-
-	// Update cache
-	n.mu.Lock()
-	n.cachedUsers = users
-	n.lastSync = time.Now()
-	n.mu.Unlock()
-
-	return users, nil
-}
-
-// FetchRooms retrieves all rooms from the server
-func (n *NetworkClient) FetchRooms() ([]*Room, error) {
-	resp, err := n.httpClient.Get(n.serverURL + "/api/rooms")
-	if err != nil {
-		n.setDisconnected()
-		return nil, fmt.Errorf("failed to fetch rooms: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned status: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var rooms []*Room
-	if err := json.Unmarshal(body, &rooms); err != nil {
-		return nil, fmt.Errorf("failed to parse rooms: %w", err)
-	}
-
-	// Update cache
-	n.mu.Lock()
-	n.cachedRooms = rooms
-	n.lastSync = time.Now()
-	n.mu.Unlock()
-
-	return rooms, nil
 }
 
 // CreateUser creates a new user on the server
@@ -206,60 +135,6 @@ func (n *NetworkClient) SendInvite(userID string) (string, error) {
 	return result["message"], nil
 }
 
-// SyncData periodically fetches data from server and updates local cache
-func (n *NetworkClient) SyncData() error {
-	// Fetch users
-	users, err := n.FetchUsers()
-	if err != nil {
-		return fmt.Errorf("failed to sync users: %w", err)
-	}
-
-	// Fetch rooms
-	rooms, err := n.FetchRooms()
-	if err != nil {
-		return fmt.Errorf("failed to sync rooms: %w", err)
-	}
-
-	fmt.Printf("Synced data: %d users, %d rooms\n", len(users), len(rooms))
-	return nil
-}
-
-// GetCachedUsers returns the locally cached users
-func (n *NetworkClient) GetCachedUsers() []*User {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	// Return a copy to avoid race conditions
-	result := make([]*User, len(n.cachedUsers))
-	copy(result, n.cachedUsers)
-	return result
-}
-
-// GetCachedRooms returns the locally cached rooms
-func (n *NetworkClient) GetCachedRooms() []*Room {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	// Return a copy to avoid race conditions
-	result := make([]*Room, len(n.cachedRooms))
-	copy(result, n.cachedRooms)
-	return result
-}
-
-// StartAutoSync starts automatic data synchronization
-func (n *NetworkClient) StartAutoSync(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	go func() {
-		for range ticker.C {
-			if n.IsConnected() {
-				if err := n.SyncData(); err != nil {
-					fmt.Printf("Auto-sync error: %v\n", err)
-				}
-			}
-		}
-	}()
-}
-
 // setDisconnected marks the client as disconnected
 func (n *NetworkClient) setDisconnected() {
 	n.mu.Lock()
@@ -286,11 +161,4 @@ func (n *NetworkClient) Ping() error {
 	n.mu.Unlock()
 
 	return nil
-}
-
-// GetLastSyncTime returns the timestamp of the last successful sync
-func (n *NetworkClient) GetLastSyncTime() time.Time {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-	return n.lastSync
 }

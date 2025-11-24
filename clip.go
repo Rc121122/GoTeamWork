@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"runtime"
 	"time"
 
+	"github.com/go-vgo/robotgo"
+	hook "github.com/robotn/gohook"
 	"golang.design/x/clipboard"
 )
 
@@ -22,6 +26,21 @@ type ClipboardItem struct {
 	Text  string            `json:"text,omitempty"`
 	Image []byte            `json:"image,omitempty"` // PNG encoded
 }
+
+const (
+	clipboardShareCooldown = 250 * time.Millisecond
+	clipboardCacheTTL      = 8 * time.Second
+)
+
+var (
+	addEvent         func(keys ...string) bool
+	getMousePosition func() (int, int)
+
+	clipboardHotkeyCombos = [][]string{
+		{"c", "cmd"},
+		{"c", "ctrl"},
+	}
+)
 
 // ReadClipboard reads the current clipboard content and returns a ClipboardItem
 func ReadClipboard() (*ClipboardItem, error) {
@@ -51,16 +70,57 @@ func ReadClipboard() (*ClipboardItem, error) {
 	return nil, fmt.Errorf("no supported clipboard content found")
 }
 
-// StartClipboardMonitor starts monitoring for the copy hotkey (Ctrl+Shift+C / Cmd+Shift+C)
+// StartClipboardMonitor starts monitoring for the copy hotkey (Cmd/Ctrl + C)
 func (a *App) StartClipboardMonitor() {
-	// TODO: Implement cross-platform global hotkey detection
-	// For now, this is a placeholder
-	fmt.Println("Clipboard monitor started (hotkey detection not implemented yet)")
+	a.clipboardMonitorOnce.Do(func() {
+		if a.ctx == nil {
+			fmt.Println("Clipboard monitor skipped: no app context")
+			return
+		}
+
+		if runtime.GOOS == "darwin" {
+			if !a.ensureAccessibilityPermission() {
+				fmt.Println("Accessibility permission denied; clipboard monitor disabled")
+				return
+			}
+		} else {
+			a.emitClipboardPermissionEvent(true, "")
+		}
+
+		addEvent = func(keys ...string) bool {
+			if len(keys) == 0 {
+				return false
+			}
+			return hook.AddEvents(keys[0], keys[1:]...)
+		}
+		getMousePosition = robotgo.GetMousePos
+
+		ctx, cancel := context.WithCancel(a.ctx)
+		a.clipboardHotkeyCancel = cancel
+
+		if err := StartClipboardHotkey(ctx, func(item *ClipboardItem, screenX, screenY int) {
+			a.prepareClipboardShare(item, screenX, screenY)
+		}); err != nil {
+			fmt.Printf("StartClipboardHotkey failed: %v\n", err)
+		}
+	})
 }
 
 // handleClipboardCopy processes a copied clipboard item
 func (a *App) handleClipboardCopy(item *ClipboardItem) {
 	fmt.Printf("Clipboard copied: type=%s\n", item.Type)
+
+	if item == nil {
+		return
+	}
+
+	if item.Type == ClipboardText {
+		item.Text = sanitizeClipboardText(item.Text)
+		if item.Text == "" {
+			fmt.Println("Clipboard text empty after sanitization; skipping broadcast")
+			return
+		}
+	}
 
 	// Assume roomID from current room or something, but since broadcast to all, perhaps global or per room.
 	// For now, use a default room or broadcast to all rooms.
@@ -80,64 +140,145 @@ func (a *App) handleClipboardCopy(item *ClipboardItem) {
 	}
 
 	// Add operation
-	op := a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem)
+	a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem)
 
-	// Broadcast to all
-	a.sseManager.BroadcastToAll(EventClipboardCopied, op)
+	// Broadcast sanitized clipboard snapshot to all connected users
+	a.sseManager.BroadcastToAll(EventClipboardCopied, item)
 }
 
-// addEvent is a wrapper used to detect the hotkey. In production you can
-// assign this to robotgo.AddEvents or a similar function. In tests we
-// override this variable to simulate hotkey presses.
-var addEvent = func(keys ...string) bool {
-	// Default: no-op (no hotkey detection) so code compiles on systems
-	// without robotgo. Consumers may set this to robotgo.AddEvents.
-	return false
-}
+// StartClipboardHotkey listens for Cmd+C (macOS) and Ctrl+C (Win/Linux) global hotkeys.
+// When the hotkey is detected, it reads the system clipboard and invokes cb with the
+// ClipboardItem and the current mouse position.
+func StartClipboardHotkey(ctx context.Context, cb func(*ClipboardItem, int, int)) error {
+	if cb == nil {
+		return errors.New("clipboard hotkey callback is required")
+	}
+	if addEvent == nil {
+		return errors.New("global hotkey detector is not configured")
+	}
+	if getMousePosition == nil {
+		return errors.New("mouse position provider is not configured")
+	}
 
-// StartClipboardHotkey listens for Cmd+Shift+C (macOS) Ctrl + Shift + C (Win/Linux) global hotkey.
-// When the hotkey is detected, it reads the system clipboard and invokes cb with the ClipboardItem.
-// The function runs until the provided context is cancelled.
-func StartClipboardHotkey(ctx context.Context, cb func(*ClipboardItem)) error {
-	// Initialize clipboard once
 	if err := clipboard.Init(); err != nil {
 		return fmt.Errorf("failed to init clipboard: %w", err)
 	}
 
-	// Hotkey array includes both Cmd+Shift+C (macOS) and Ctrl+Shift+C (Win/Linux).
-	allKeys := []string{"c", "cmd", "shift", "c", "ctrl", "shift"}
+	for _, combo := range clipboardHotkeyCombos {
+		keys := cloneKeys(combo)
+		go monitorHotkey(ctx, keys, cb)
+	}
 
-	go func() {
-		for {
+	return nil
+}
+
+func monitorHotkey(ctx context.Context, combo []string, cb func(*ClipboardItem, int, int)) {
+	for {
+		if ctx != nil {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				// Block until the hotkey is pressed.
-				// The listener is configured for Cmd + Shift + C OR Ctrl + Shift + C.
-				// addEvent returns true when the key combination is detected.
-
-				if addEvent(allKeys...) {
-					// Read clipboard and invoke callback
-					item, err := ReadClipboard()
-
-					// add hotkey event error handling
-					if err != nil {
-						fmt.Printf("Warning: Failed to read clipboard after hotkey: %v\n", err)
-					} else if item != nil {
-						cb(item)
-					}
-					// Small debounce to avoid multiple rapid triggers
-					time.Sleep(200 * time.Millisecond)
-				} else {
-					// If AddEvent returned false immediately, yield to avoid busy loop
-					time.Sleep(50 * time.Millisecond)
-				}
 			}
 		}
-	}()
 
-	return nil
+		if addEvent(combo...) {
+			item, err := ReadClipboard()
+			if err != nil {
+				fmt.Printf("Warning: failed to read clipboard after hotkey: %v\n", err)
+				time.Sleep(clipboardShareCooldown)
+				continue
+			}
+
+			x, y := getMousePosition()
+			cb(item, x, y)
+			time.Sleep(clipboardShareCooldown)
+		} else {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
+func cloneKeys(keys []string) []string {
+	dup := make([]string, len(keys))
+	copy(dup, keys)
+	return dup
+}
+
+func (a *App) ensureAccessibilityPermission() bool {
+	if runtime.GOOS != "darwin" {
+		return true
+	}
+
+	if hasAccessibilityPermission() {
+		a.emitClipboardPermissionEvent(true, "")
+		return true
+	}
+
+	a.emitClipboardPermissionEvent(false, "GOproject needs Accessibility access to watch Cmd+C events.")
+	if !requestAccessibilityPermission() {
+		return false
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if hasAccessibilityPermission() {
+			a.emitClipboardPermissionEvent(true, "")
+			return true
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	granted := hasAccessibilityPermission()
+	if granted {
+		a.emitClipboardPermissionEvent(true, "")
+	}
+	return granted
+}
+
+func (a *App) prepareClipboardShare(item *ClipboardItem, screenX, screenY int) {
+	a.cacheClipboardItem(item)
+	a.emitClipboardButtonEvent(screenX, screenY)
+}
+
+func (a *App) cacheClipboardItem(item *ClipboardItem) {
+	a.pendingClipboardMu.Lock()
+	defer a.pendingClipboardMu.Unlock()
+	a.pendingClipboardItem = item
+	a.pendingClipboardAt = time.Now()
+}
+
+func (a *App) consumePendingClipboardItem() *ClipboardItem {
+	a.pendingClipboardMu.Lock()
+	defer a.pendingClipboardMu.Unlock()
+
+	if a.pendingClipboardItem == nil {
+		return nil
+	}
+	if time.Since(a.pendingClipboardAt) > clipboardCacheTTL {
+		a.pendingClipboardItem = nil
+		return nil
+	}
+
+	item := a.pendingClipboardItem
+	a.pendingClipboardItem = nil
+	return item
+}
+
+// ShareSystemClipboard publishes the most recent clipboard capture.
+// If the cached value expired, it re-reads the live clipboard as a fallback.
+func (a *App) ShareSystemClipboard() (bool, error) {
+	item := a.consumePendingClipboardItem()
+	if item == nil {
+		var err error
+		item, err = ReadClipboard()
+		if err != nil {
+			return false, err
+		}
+	}
+
+	a.handleClipboardCopy(item)
+	return true, nil
 }
 
 // GetClipboardItem is a Wails-exposed function to manually get clipboard content

@@ -12,14 +12,12 @@ All TypeScript models referenced below are defined in `frontend/wailsjs/go/model
 ### Application & Connectivity
 - `GetMode(): Promise<string>` → Returns `'host'` or `'client'` based on launch flag.
 - `GetConnectionStatus(): Promise<boolean>` → Client-only helper that reports the `NetworkClient` connectivity state.
-- `SyncFromServer(): Promise<void>` → Client-only manual sync that refreshes cached users/rooms from the host.
 - `StartHTTPServer(port: string): Promise<void>` → Host-only. Starts the embedded REST/SSE server (already invoked automatically on startup in host mode).
 - `Greet(name: string): Promise<string>` → Simple diagnostics helper used in samples.
 
 ### User Management
 - `ListAllUsers(): Promise<Array<main.User>>` → Host-side map snapshot of known users.
 - `CreateUser(name: string): Promise<main.User>` → Host-only creator that emits a `user_created` SSE event.
-- `GetServerUsers(): Promise<Array<main.User>>` → Client helper that proxies `/api/users` via `NetworkClient`.
 
 ### Room Management
 - `GetAllRooms(): Promise<Array<main.Room>>` → Returns every room tracked by the host.
@@ -41,21 +39,26 @@ Unless otherwise noted, responses are JSON. Request DTOs live in `types.go`.
 - `GET /api/users/{id}` → Retrieves a single user or returns `404`.
 - `GET /api/rooms` → `main.Room[]` describing current rooms.
 - `POST /api/rooms { name: string }` → Explicit room creation (host dashboards, tests).
-- `POST /api/invite { userId: string }` → Adds the user to the current room, creating one if required. Response `{ message: string }` mirrors `Invite` result text.
+- `POST /api/invite { userId: string, inviterId: string }` → Sanitizes the payload, ensures/creates the inviter's room, and emits an SSE invite for the target user so they can accept via `/api/join`.
 - `POST /api/chat { roomId, userId, message }` → Persists a chat message and triggers SSE updates. Response `{ message: string }`.
 - `GET /api/chat/{roomId}` → Historical chat transcript (`main.ChatMessage[]`).
 - `POST /api/leave { userId: string }` → Removes the user from their room and may tear down the room. Response `{ message: string }`.
+- `GET /api/operations/{roomId}?since=<opId>` → Returns git-style operations recorded after the provided operation ID so reconnecting clients can catch up before resuming SSE.
 
 ### Server-Sent Events
 
 - `GET /api/sse?userId=<id>` → Opens an SSE stream for the user. The handler keeps the connection alive with 30s heartbeats and cleans up on disconnect.
 - Event payloads are wrapped as `{ type, data, timestamp }`:
     - `connected` → `{ status: "connected" }`
-  - `user_created` → `main.User`
-  - `room_created` → `main.Room`
-  - `user_invited` → `{ roomId, roomName, inviter }`
-  - `chat_message` → `main.ChatMessage`
-  - `heartbeat` → `{ timestamp }` (maintenance; emitted automatically)
+    - `user_created` → `main.User`
+    - `room_created` → `main.Room`
+    - `room_deleted` → `{ roomId, roomName }`
+    - `user_invited` → `{ roomId, roomName, inviter }`
+    - `user_joined` → `{ roomId, roomName, userId, userName }`
+    - `user_left` → `{ roomId, roomName, userId, userName }`
+    - `chat_message` → `main.ChatMessage`
+    - `clipboard_copied` → `{ type: 'text' | 'image', text?, image? }`
+    - `heartbeat` → `{ timestamp }` (maintenance; emitted automatically)
 
 ## Core Data Structures
 

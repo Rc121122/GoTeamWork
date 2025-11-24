@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // handleUsers handles GET /api/users (list all users) and POST /api/users (create user)
@@ -34,10 +35,16 @@ func (a *App) handleUsers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		sanitizedName := sanitizeUserName(req.Name)
+		if sanitizedName == "" {
+			http.Error(w, "Name is invalid", http.StatusBadRequest)
+			return
+		}
+
 		// Check if username is unique
 		a.mu.RLock()
 		for _, user := range a.users {
-			if user.Name == req.Name {
+			if user.Name == sanitizedName {
 				a.mu.RUnlock()
 				http.Error(w, "Username already exists", http.StatusConflict)
 				return
@@ -45,7 +52,7 @@ func (a *App) handleUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		a.mu.RUnlock()
 
-		user := a.CreateUser(req.Name)
+		user := a.CreateUser(sanitizedName)
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(user)
 		return
@@ -123,7 +130,13 @@ func (a *App) handleRooms(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		room := a.CreateRoom(req.Name)
+		roomName := sanitizeRoomName(req.Name)
+		if roomName == "" {
+			http.Error(w, "Room name is invalid", http.StatusBadRequest)
+			return
+		}
+
+		room := a.CreateRoom(roomName)
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(room)
 		return
@@ -151,6 +164,11 @@ func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 	var req InviteUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" || req.InviterID == "" {
+		http.Error(w, "userId and inviterId are required", http.StatusBadRequest)
 		return
 	}
 
@@ -281,7 +299,7 @@ func (a *App) handleOperations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sinceID := r.URL.Query().Get("since")
+	sinceID := strings.TrimSpace(r.URL.Query().Get("since"))
 
 	operations := a.GetOperations(roomID, sinceID)
 	json.NewEncoder(w).Encode(operations)

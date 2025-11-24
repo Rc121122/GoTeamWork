@@ -8,6 +8,7 @@ import {
   LeaveRoom,
   ListAllUsers,
   SendChatMessage,
+  ShareSystemClipboard,
 } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import type { AppMode, ChatMessage, Room, User } from "./types";
@@ -83,4 +84,8 @@ export async function hostSendChatMessage(roomId: string, userId: string, messag
 export async function hostFetchChatHistory(roomId: string): Promise<ChatMessage[]> {
   const history = await GetChatHistory(roomId);
   return history.map(mapChatMessage);
+}
+
+export function shareSystemClipboard(): Promise<boolean> {
+  return ShareSystemClipboard();
 }

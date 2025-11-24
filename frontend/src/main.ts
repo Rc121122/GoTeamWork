@@ -4,6 +4,7 @@ import "./app.css";
 import { getAppMode } from "./api/wailsBridge";
 import { renderHostLobby } from "./host";
 import { renderClientUI } from "./client";
+import { initClipboardShareButton } from "./ui/hotkeyIndicator";
 
 async function initApp(): Promise<void> {
   try {
@@ -21,5 +22,6 @@ async function initApp(): Promise<void> {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  initClipboardShareButton();
   void initApp();
 });

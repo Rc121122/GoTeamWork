@@ -38,10 +38,6 @@ export function GetOperations(arg1, arg2) {
   return window['go']['main']['App']['GetOperations'](arg1, arg2);
 }
 
-export function GetServerUsers() {
-  return window['go']['main']['App']['GetServerUsers']();
-}
-
 export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }
@@ -70,14 +66,14 @@ export function SendChatMessage(arg1, arg2, arg3) {
   return window['go']['main']['App']['SendChatMessage'](arg1, arg2, arg3);
 }
 
+export function ShareSystemClipboard() {
+  return window['go']['main']['App']['ShareSystemClipboard']();
+}
+
 export function StartClipboardMonitor() {
   return window['go']['main']['App']['StartClipboardMonitor']();
 }
 
 export function StartHTTPServer(arg1) {
   return window['go']['main']['App']['StartHTTPServer'](arg1);
-}
-
-export function SyncFromServer() {
-  return window['go']['main']['App']['SyncFromServer']();
 }
