@@ -12,18 +12,40 @@ const (
 	maxClipboardTextLen = 4000
 )
 
-// sanitizePlainText trims whitespace, strips control characters (except standard newlines/tabs),
+// sanitizePlainText trims whitespace, normalizes CRLF -> LF, strips control/format/private/non-character runes,
 // and enforces a maximum rune length so hostile payloads cannot overflow downstream buffers.
 func sanitizePlainText(input string, maxLen int) string {
-	trimmed := strings.TrimSpace(input)
+	// Normalize CRLF and stray CR to LF
+	s := strings.ReplaceAll(input, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+
+	// Trim surrounding whitespace
+	s = strings.TrimSpace(s)
 
 	cleaned := strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' {
+		// Remove Cc (control) except LF and TAB
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			return -1
+		}
+		// Remove format characters (zero-width, bidi overrides, etc.)
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		// Remove surrogate, private-use
+		if unicode.Is(unicode.Cs, r) || unicode.Is(unicode.Co, r) {
+			return -1
+		}
+		// Remove Unicode non-characters U+FDD0..U+FDEF and code points ending with FFFE/FFFF
+		if r >= 0xFDD0 && r <= 0xFDEF {
+			return -1
+		}
+		if r&0xFFFE == 0xFFFE {
 			return -1
 		}
 		return r
-	}, trimmed)
+	}, s)
 
+	// Enforce maxLen on rune count (consider grapheme-cluster-based truncation if needed)
 	if maxLen > 0 {
 		runes := []rune(cleaned)
 		if len(runes) > maxLen {

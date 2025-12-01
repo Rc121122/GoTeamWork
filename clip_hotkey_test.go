@@ -21,11 +21,11 @@ func TestStartClipboardHotkey(t *testing.T) {
 
 	// Initialize clipboard and set known value
 	if err := clipboard.Init(); err != nil {
-		t.Fatalf("clipboard init failed: %v", err)
+		t.Skipf("clipboard init failed: %v", err)
 	}
 	testText := "hotkey-test-123"
 	if err := clipboard.Write(clipboard.FmtText, []byte(testText)); err != nil {
-		t.Fatalf("failed to write clipboard: %v", err)
+		t.Skipf("failed to write clipboard: %v", err)
 	}
 
 	// Override addEvent to return true exactly once

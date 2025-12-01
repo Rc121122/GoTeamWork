@@ -105,11 +105,11 @@ func (a *App) StartClipboardMonitor() {
 
 // handleClipboardCopy processes a copied clipboard item
 func (a *App) handleClipboardCopy(item *ClipboardItem) {
-	fmt.Printf("Clipboard copied: type=%s\n", item.Type)
-
 	if item == nil {
 		return
 	}
+
+	fmt.Printf("Clipboard copied: type=%s\n", item.Type)
 
 	if item.Type == ClipboardText {
 		item.Text = sanitizeClipboardText(item.Text)

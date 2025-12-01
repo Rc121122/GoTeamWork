@@ -1,6 +1,3 @@
-//go:build lan_scanner
-// +build lan_scanner
-
 package main
 
 import (
