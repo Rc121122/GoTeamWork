@@ -10,6 +10,13 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+const (
+	maxOperationsPerRoom   = 1000             // Maximum operations to keep per room
+	maxChatMessagesPerRoom = 100              // Maximum chat messages to keep per room
+	roomCleanupInterval    = 30 * time.Minute // Check for empty rooms every 30 minutes
+	userTimeout            = 24 * time.Hour   // Remove inactive users after 24 hours
+)
+
 // NewHistoryPool creates a new history pool
 func NewHistoryPool() *HistoryPool {
 	return &HistoryPool{
@@ -18,7 +25,7 @@ func NewHistoryPool() *HistoryPool {
 	}
 }
 
-// AddOperation adds an operation to the history pool
+// AddOperation adds an operation to the history pool with size limits
 func (hp *HistoryPool) AddOperation(roomID string, opType OperationType, itemID string, item *Item) *Operation {
 	hp.mu.Lock()
 	defer hp.mu.Unlock()
@@ -41,8 +48,28 @@ func (hp *HistoryPool) AddOperation(roomID string, opType OperationType, itemID 
 		Timestamp: time.Now().Unix(),
 	}
 
+	// Add operation to room history
 	hp.operations[roomID] = append(hp.operations[roomID], op)
+
+	// Enforce size limits
+	hp.enforceLimits(roomID)
+
 	return op
+}
+
+// enforceLimits ensures room operation counts stay within limits
+func (hp *HistoryPool) enforceLimits(roomID string) {
+	ops := hp.operations[roomID]
+	if len(ops) <= maxOperationsPerRoom {
+		return
+	}
+
+	// Keep only the most recent operations
+	keepStart := len(ops) - maxOperationsPerRoom
+	hp.operations[roomID] = ops[keepStart:]
+
+	fmt.Printf("Trimmed operations for room %s to %d (removed %d old operations)\n",
+		roomID, maxOperationsPerRoom, keepStart)
 }
 
 // GetOperations returns all operations for a room since a given operation ID
@@ -80,7 +107,7 @@ func (hp *HistoryPool) GetOperations(roomID, sinceID string) []*Operation {
 	return result
 }
 
-// GetCurrentChatMessages returns current chat messages by applying operations
+// GetCurrentChatMessages returns current chat messages by applying operations (limited to recent messages)
 func (hp *HistoryPool) GetCurrentChatMessages(roomID string) []*ChatMessage {
 	hp.mu.RLock()
 	defer hp.mu.RUnlock()
@@ -105,9 +132,22 @@ func (hp *HistoryPool) GetCurrentChatMessages(roomID string) []*ChatMessage {
 		result = append(result, msg)
 	}
 
-	// Sort by timestamp
-	// Assuming IDs are sequential, but to be safe, sort
-	// For now, assume order is preserved
+	// Sort by timestamp (simple bubble sort for now)
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[i].Timestamp > result[j].Timestamp {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+
+	// Limit to most recent messages
+	if len(result) > maxChatMessagesPerRoom {
+		start := len(result) - maxChatMessagesPerRoom
+		result = result[start:]
+		fmt.Printf("Limited chat history for room %s to %d messages\n", roomID, maxChatMessagesPerRoom)
+	}
+
 	return result
 }
 
@@ -206,6 +246,9 @@ func (a *App) startup(ctx context.Context) {
 
 		// Start HTTP server for central server functionality
 		a.StartHTTPServer("8080")
+
+		// Start cleanup goroutines for host mode
+		go a.startCleanupTasks(ctx)
 	} else if a.Mode == "client" {
 		// Initialize network client for client mode
 		a.networkClient = NewNetworkClient("http://localhost:8080")
@@ -475,6 +518,48 @@ func (a *App) GetConnectionStatus() bool {
 		return false
 	}
 	return a.networkClient.IsConnected()
+}
+
+// startCleanupTasks starts background cleanup goroutines for memory management
+func (a *App) startCleanupTasks(ctx context.Context) {
+	// Room cleanup ticker
+	roomTicker := time.NewTicker(roomCleanupInterval)
+	go func() {
+		defer roomTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-roomTicker.C:
+				a.cleanupEmptyRooms()
+			}
+		}
+	}()
+
+	fmt.Printf("Started cleanup tasks: room cleanup every %v\n", roomCleanupInterval)
+}
+
+// cleanupEmptyRooms removes rooms with no active users
+func (a *App) cleanupEmptyRooms() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	roomsToDelete := make([]string, 0)
+
+	for roomID, room := range a.rooms {
+		if len(room.UserIDs) == 0 {
+			roomsToDelete = append(roomsToDelete, roomID)
+		}
+	}
+
+	for _, roomID := range roomsToDelete {
+		delete(a.rooms, roomID)
+		fmt.Printf("Cleaned up empty room: %s\n", roomID)
+	}
+
+	if len(roomsToDelete) > 0 {
+		fmt.Printf("Cleanup completed: removed %d empty rooms\n", len(roomsToDelete))
+	}
 }
 
 // LeaveRoom removes a user from their current room

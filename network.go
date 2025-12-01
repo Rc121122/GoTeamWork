@@ -29,27 +29,48 @@ func NewNetworkClient(serverURL string) *NetworkClient {
 	}
 }
 
-// ConnectToServer establishes connection to the central server
+// ConnectToServer establishes connection to the central server with retry logic
 func (n *NetworkClient) ConnectToServer() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// Try to ping the server
-	resp, err := n.httpClient.Get(n.serverURL + "/api/users")
-	if err != nil {
-		n.connected = false
-		return fmt.Errorf("failed to connect to server: %w", err)
-	}
-	defer resp.Body.Close()
+	const maxRetries = 3
+	const retryDelay = 2 * time.Second
 
-	if resp.StatusCode != http.StatusOK {
-		n.connected = false
-		return fmt.Errorf("server returned status: %d", resp.StatusCode)
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Try to ping the server
+		resp, err := n.httpClient.Get(n.serverURL + "/api/users")
+		if err != nil {
+			lastErr = err
+			if attempt < maxRetries {
+				fmt.Printf("Connection attempt %d failed, retrying in %v: %v\n", attempt, retryDelay, err)
+				time.Sleep(retryDelay)
+				continue
+			}
+			n.connected = false
+			return fmt.Errorf("failed to connect to server after %d attempts: %w", maxRetries, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("server returned status: %d", resp.StatusCode)
+			if attempt < maxRetries {
+				fmt.Printf("Connection attempt %d failed (status %d), retrying in %v\n", attempt, resp.StatusCode, retryDelay)
+				time.Sleep(retryDelay)
+				continue
+			}
+			n.connected = false
+			return lastErr
+		}
+
+		n.connected = true
+		fmt.Println("Successfully connected to central server:", n.serverURL)
+		return nil
 	}
 
-	n.connected = true
-	fmt.Println("Successfully connected to central server:", n.serverURL)
-	return nil
+	n.connected = false
+	return lastErr
 }
 
 // IsConnected returns the current connection status

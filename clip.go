@@ -78,13 +78,10 @@ func (a *App) StartClipboardMonitor() {
 			return
 		}
 
-		if runtime.GOOS == "darwin" {
-			if !a.ensureAccessibilityPermission() {
-				fmt.Println("Accessibility permission denied; clipboard monitor disabled")
-				return
-			}
-		} else {
-			a.emitClipboardPermissionEvent(true, "")
+		// Check clipboard permissions for all platforms
+		if !a.ensureAccessibilityPermission() {
+			fmt.Println("Clipboard permission denied; clipboard monitor disabled")
+			return
 		}
 
 		addEvent = func(keys ...string) bool {
@@ -206,34 +203,53 @@ func cloneKeys(keys []string) []string {
 }
 
 func (a *App) ensureAccessibilityPermission() bool {
-	if runtime.GOOS != "darwin" {
-		return true
-	}
-
-	if hasAccessibilityPermission() {
-		a.emitClipboardPermissionEvent(true, "")
-		return true
-	}
-
-	a.emitClipboardPermissionEvent(false, "GOproject needs Accessibility access to watch Cmd+C events.")
-	if !requestAccessibilityPermission() {
-		return false
-	}
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	if runtime.GOOS == "darwin" {
 		if hasAccessibilityPermission() {
 			a.emitClipboardPermissionEvent(true, "")
 			return true
 		}
-		time.Sleep(500 * time.Millisecond)
-	}
 
-	granted := hasAccessibilityPermission()
-	if granted {
-		a.emitClipboardPermissionEvent(true, "")
+		a.emitClipboardPermissionEvent(false, "GOproject needs Accessibility access to watch Cmd+C events.")
+		if !requestAccessibilityPermission() {
+			return false
+		}
+
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if hasAccessibilityPermission() {
+				a.emitClipboardPermissionEvent(true, "")
+				return true
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		granted := hasAccessibilityPermission()
+		if granted {
+			a.emitClipboardPermissionEvent(true, "")
+		}
+		return granted
+	} else {
+		// For Windows and Linux, check clipboard access
+		if hasAccessibilityPermission() {
+			a.emitClipboardPermissionEvent(true, "")
+			return true
+		}
+
+		// Try to request permission
+		a.emitClipboardPermissionEvent(false, "GOproject needs clipboard access. Please ensure no other application is locking the clipboard.")
+		if !requestAccessibilityPermission() {
+			return false
+		}
+
+		// Give a moment for permission to be granted
+		time.Sleep(1 * time.Second)
+
+		granted := hasAccessibilityPermission()
+		if granted {
+			a.emitClipboardPermissionEvent(true, "")
+		}
+		return granted
 	}
-	return granted
 }
 
 func (a *App) prepareClipboardShare(item *ClipboardItem, screenX, screenY int) {
