@@ -8,7 +8,9 @@ import (
 	"time"
 )
 
+// Configuration constants
 const (
+	// The port number to scan on each host
 	TargetPort = "80"
 	// Timeout for attempting a connection to each IP
 	Timeout = 300 * time.Millisecond
@@ -30,7 +32,8 @@ func ScanHost(ip string, port string, wg *sync.WaitGroup, results chan string) {
 	}
 }
 
-// GetSubnetBaseIP retrieves the base IP address of the local subnet
+// GetSubnetBaseIP retrieves the base IP address of the local subnet (e.g., 192.168.1.)
+func GetSubnetBaseIP() (string, error) {
 	// Get all network interfaces
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -57,7 +60,7 @@ func ScanHost(ip string, port string, wg *sync.WaitGroup, results chan string) {
 					// Convert the IPv4 address to 4 bytes
 					ip := ipNet.IP.To4()
 
-					// Extract the first three octets as the subnet base
+					// Extract the first three octets as the subnet base (e.g., 192.168.1)
 					// Append a "." for subsequent iteration
 					return fmt.Sprintf("%d.%d.%d.", ip[0], ip[1], ip[2]), nil
 				}
@@ -69,7 +72,7 @@ func ScanHost(ip string, port string, wg *sync.WaitGroup, results chan string) {
 }
 
 func main() {
-	fmt.Println("Starting LAN Scanner...")
+	fmt.Println(" Starting LAN Scanner...")
 
 	subnetBase, err := GetSubnetBaseIP()
 	if err != nil {
@@ -87,7 +90,7 @@ func main() {
 	startTime := time.Now()
 	scanCount := 0
 
-	// Iterate through all possible IP addresses
+	// Iterate through all possible IP addresses (from x.x.x.1 to x.x.x.254)
 	for i := 1; i <= 254; i++ {
 		ip := fmt.Sprintf("%s%d", subnetBase, i)
 		wg.Add(1)
@@ -103,9 +106,12 @@ func main() {
 		}
 	}()
 
+	// Wait for all scanning Goroutines to complete
 	wg.Wait()
+
+	// Close the results channel
 	close(results)
 
 	elapsed := time.Since(startTime)
-	fmt.Printf("\n Scan complete! Scanned %d IPs in %s\n", scanCount, elapsed)
+	fmt.Printf("\nScan complete! Scanned %d IPs in %s\n", scanCount, elapsed)
 }
