@@ -41,7 +41,8 @@ go build -tags windows -o clipwindows.exe clipwindows.go
 - Press `Ctrl+C` to copy content
 - Shows text and image content
 - **Automatically detects file paths** when copying files or folders
-- Automatically modifies copied text as demonstration
+- **Uses Windows API** to detect file copies (CF_HDROP format)
+- **Smart duplicate prevention** - tracks displayed files to avoid repeated notifications
 
 ## Features Tested
 
@@ -49,6 +50,10 @@ go build -tags windows -o clipwindows.exe clipwindows.go
 - Text content monitoring
 - Image content monitoring (where supported)
 - **File path detection** - automatically identifies when files/folders are copied
+- **Native Windows API integration** - uses CF_HDROP format for file detection
+- **Smart duplicate prevention** - tracks displayed files to avoid repeated notifications
+- **Hybrid detection** - combines event-driven and periodic checking for reliability
+- **Clean monitoring** - reads clipboard without modifying content
 - Cross-platform compatibility
 - Permission handling
 

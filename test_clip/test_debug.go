@@ -130,31 +130,24 @@ func main() {
 
 	fmt.Println("Monitoring clipboard changes...")
 
-	// Track last displayed file paths to avoid duplicates
-	lastFilePaths := make(map[string]bool)
-
 	for {
 		select {
 		case data := <-chText:
+			fmt.Printf("DEBUG: Text clipboard changed, length: %d\n", len(data))
+
 			// Always check for file paths when any clipboard change occurs
 			if filePaths := getFilePathsFromClipboard(); len(filePaths) > 0 {
-				newPaths := false
 				for _, path := range filePaths {
-					if !lastFilePaths[path] {
-						fmt.Printf("You copied file: %s\n", path)
-						lastFilePaths[path] = true
-						newPaths = true
-					}
+					fmt.Printf("You copied file: %s\n", path)
 				}
-				if newPaths {
-					continue
-				}
+				continue
 			}
 
 			text := string(data)
 
 			// Skip empty or whitespace-only text
 			if strings.TrimSpace(text) == "" {
+				fmt.Printf("DEBUG: Skipping empty text\n")
 				continue
 			}
 
@@ -170,49 +163,25 @@ func main() {
 				}
 			}
 
-			// Removed clipboard modification to avoid infinite loops
-
-		case data := <-chImage:
-			// Check for file paths when image is copied (some file managers copy images as files)
-			if filePaths := getFilePathsFromClipboard(); len(filePaths) > 0 {
-				newPaths := false
-				for _, path := range filePaths {
-					if !lastFilePaths[path] {
-						fmt.Printf("You copied file: %s\n", path)
-						lastFilePaths[path] = true
-						newPaths = true
-					}
-				}
-				if newPaths {
-					continue
-				}
+			// Only modify clipboard if it's not already modified text (avoid infinite loop)
+			if !strings.HasPrefix(text, "Modified: ") {
+				// Test writing back to clipboard
+				testText := fmt.Sprintf("Modified: %s", text)
+				clipboard.Write(clipboard.FmtText, []byte(testText))
+				fmt.Printf("Modified clipboard to: %s\n", testText)
 			}
 
+		case data := <-chImage:
+			fmt.Printf("DEBUG: Image clipboard changed, size: %d bytes\n", len(data))
 			if len(data) > 0 {
 				fmt.Printf("You copied an image (%d bytes)\n", len(data))
+
 				// Test writing back (though we can't modify image data easily)
 				fmt.Println("Image copied to clipboard")
 			}
 
-		case <-time.After(2 * time.Second):
-			// Periodic check for file paths (but only show new ones)
-			if filePaths := getFilePathsFromClipboard(); len(filePaths) > 0 {
-				newPaths := false
-				for _, path := range filePaths {
-					if !lastFilePaths[path] {
-						fmt.Printf("You copied file: %s\n", path)
-						lastFilePaths[path] = true
-						newPaths = true
-					}
-				}
-				// Clear old paths if no new activity for a while
-				if !newPaths && len(lastFilePaths) > 10 {
-					lastFilePaths = make(map[string]bool)
-					for _, path := range filePaths {
-						lastFilePaths[path] = true
-					}
-				}
-			}
+		case <-time.After(30 * time.Second):
+			fmt.Println("No clipboard activity for 30 seconds...")
 		}
 	}
 }
