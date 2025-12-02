@@ -38,9 +38,12 @@ func TestSSERouteInviteMessageLeave(t *testing.T) {
 	inviterConn := attachClient(app, inviter.ID)
 	inviteeConn := attachClient(app, invitee.ID)
 
-	roomID, inviteMessage := app.InviteWithRoom(invitee.ID, inviter.ID)
-	if roomID == "" || strings.HasPrefix(inviteMessage, "Error") {
-		t.Fatalf("expected invite to succeed, got room=%s message=%s", roomID, inviteMessage)
+	inviteID, inviteMessage, expiresAt := app.InviteWithRoom(invitee.ID, inviter.ID, "Let's pair up")
+	if inviteID == "" || strings.HasPrefix(inviteMessage, "Error") {
+		t.Fatalf("expected invite to succeed, got invite=%s message=%s", inviteID, inviteMessage)
+	}
+	if expiresAt == 0 {
+		t.Fatalf("expected expiry timestamp from InviteWithRoom")
 	}
 
 	inviteEvents := inviteeConn.Events()
@@ -50,28 +53,27 @@ func TestSSERouteInviteMessageLeave(t *testing.T) {
 	}
 
 	type invitePayload struct {
-		RoomID   string `json:"roomId"`
-		RoomName string `json:"roomName"`
+		InviteID string `json:"inviteId"`
 		Inviter  string `json:"inviter"`
+		Message  string `json:"message"`
 	}
 	invite := decodeEventPayload[invitePayload](t, evt)
-	if invite.RoomID != roomID {
-		t.Fatalf("expected invite payload room %s, got %s", roomID, invite.RoomID)
+	if invite.InviteID != inviteID {
+		t.Fatalf("expected invite payload id %s, got %s", inviteID, invite.InviteID)
 	}
 
 	inviterConn.Reset()
 	inviteeConn.Reset()
 
-	joinMessage := app.JoinRoom(invitee.ID, roomID)
-	if strings.HasPrefix(joinMessage, "Error") {
-		t.Fatalf("expected join to succeed, got %s", joinMessage)
+	roomID, acceptMessage := app.AcceptInvite(inviteID, invitee.ID)
+	if strings.HasPrefix(acceptMessage, "Error") {
+		t.Fatalf("expected accept to succeed, got %s", acceptMessage)
+	}
+	if roomID == "" {
+		t.Fatalf("expected room ID from accept flow")
 	}
 
 	inviterJoinedEvents := inviterConn.Events()
-	joinEvt, found := findEvent(inviterJoinedEvents, EventUserJoined)
-	if !found {
-		t.Fatalf("expected user_joined event for inviter, got %#v", inviterJoinedEvents)
-	}
 
 	type joinedPayload struct {
 		RoomID   string `json:"roomId"`
@@ -79,9 +81,21 @@ func TestSSERouteInviteMessageLeave(t *testing.T) {
 		UserID   string `json:"userId"`
 		UserName string `json:"userName"`
 	}
-	joined := decodeEventPayload[joinedPayload](t, joinEvt)
-	if joined.UserID != invitee.ID {
-		t.Fatalf("expected joined user %s, got %s", invitee.ID, joined.UserID)
+
+	foundInvitee := false
+	for _, evt := range inviterJoinedEvents {
+		if evt.Name != string(EventUserJoined) {
+			continue
+		}
+		payload := decodeEventPayload[joinedPayload](t, evt)
+		if payload.UserID == invitee.ID {
+			foundInvitee = true
+			break
+		}
+	}
+
+	if !foundInvitee {
+		t.Fatalf("expected inviter to receive invitee join event, got %#v", inviterJoinedEvents)
 	}
 
 	inviteeJoinedEvents := inviteeConn.Events()

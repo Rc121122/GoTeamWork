@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ const (
 	maxChatMessagesPerRoom = 100              // Maximum chat messages to keep per room
 	roomCleanupInterval    = 30 * time.Minute // Check for empty rooms every 30 minutes
 	userTimeout            = 24 * time.Hour   // Remove inactive users after 24 hours
+	inviteTimeout          = 30 * time.Second // Pending invites expire after 30 seconds
 )
 
 // NewHistoryPool creates a new history pool
@@ -180,17 +182,19 @@ func (hp *HistoryPool) GetCurrentClipboardItems(roomID string) []*ClipboardItem 
 
 // App struct
 type App struct {
-	ctx           context.Context
-	Mode          string
-	users         map[string]*User
-	rooms         map[string]*Room
-	currentUser   *User
-	currentRoom   *Room
-	roomCounter   int
-	historyPool   *HistoryPool
-	mu            sync.RWMutex
-	networkClient *NetworkClient // For client mode
-	sseManager    *SSEManager    // For SSE events
+	ctx            context.Context
+	Mode           string
+	users          map[string]*User
+	rooms          map[string]*Room
+	currentUser    *User
+	currentRoom    *Room
+	roomCounter    int
+	inviteCounter  int
+	historyPool    *HistoryPool
+	mu             sync.RWMutex
+	networkClient  *NetworkClient // For client mode
+	sseManager     *SSEManager    // For SSE events
+	pendingInvites map[string]*PendingInvite
 
 	clipboardMonitorOnce  sync.Once
 	clipboardHotkeyCancel context.CancelFunc
@@ -207,11 +211,12 @@ const (
 // NewApp creates a new App application struct
 func NewApp(mode string) *App {
 	app := &App{
-		Mode:        mode,
-		users:       make(map[string]*User),
-		rooms:       make(map[string]*Room),
-		historyPool: NewHistoryPool(),
-		sseManager:  NewSSEManager(),
+		Mode:           mode,
+		users:          make(map[string]*User),
+		rooms:          make(map[string]*Room),
+		pendingInvites: make(map[string]*PendingInvite),
+		historyPool:    NewHistoryPool(),
+		sseManager:     NewSSEManager(),
 	}
 
 	// Initialize with a default current user for host mode
@@ -359,71 +364,63 @@ func (a *App) CreateRoom(name string) *Room {
 	return room
 }
 
-// InviteWithRoom invites a user to a room, creating one if needed
-// This is used in client mode where users can invite each other
-func (a *App) InviteWithRoom(inviteeID, inviterID string) (string, string) {
+// InviteWithRoom now creates a pending invite that is fulfilled once the invitee accepts.
+// It no longer creates rooms eagerly; rooms are created when the invite is accepted.
+func (a *App) InviteWithRoom(inviteeID, inviterID, message string) (string, string, int64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Check if invitee exists
-	invitee, exists := a.users[inviteeID]
-	if !exists {
-		return "", "Error: Invitee not found"
+	invitee, ok := a.users[inviteeID]
+	if !ok {
+		return "", "Error: Invitee not found", 0
 	}
 
-	// Check if inviter exists
-	inviter, exists := a.users[inviterID]
-	if !exists {
-		return "", "Error: Inviter not found"
+	inviter, ok := a.users[inviterID]
+	if !ok {
+		return "", "Error: Inviter not found", 0
 	}
 
-	// Get or create room for inviter
-	var room *Room
 	if inviter.RoomID != nil {
-		if existing, ok := a.rooms[*inviter.RoomID]; ok {
-			room = existing
-		}
+		return "", "Error: Inviter already in a room", 0
 	}
 
-	if room == nil {
-		a.roomCounter++
-		roomID := fmt.Sprintf("room_%d", a.roomCounter)
-		room = &Room{
-			ID:      roomID,
-			Name:    fmt.Sprintf("Room %d", a.roomCounter),
-			UserIDs: []string{},
-		}
-		a.rooms[roomID] = room
-		fmt.Printf("Created new room %s for inviter %s\n", room.ID, inviterID)
+	if invitee.RoomID != nil {
+		return "", "Error: Invitee already in a room", 0
 	}
 
-	if !contains(room.UserIDs, inviterID) {
-		room.UserIDs = append(room.UserIDs, inviterID)
-		inviter.RoomID = &room.ID
+	cleanMessage := sanitizeInviteMessage(message)
+	if cleanMessage == "" {
+		cleanMessage = fmt.Sprintf("Hi, it's me, %s.", inviter.Name)
 	}
 
-	// Tell the inviter's frontend to show the room immediately
-	selfPayload := map[string]interface{}{
-		"roomId":   room.ID,
-		"roomName": room.Name,
-		"inviter":  "Self",
+	a.inviteCounter++
+	inviteID := fmt.Sprintf("invite_%d", a.inviteCounter)
+	createdAt := time.Now()
+	expiresAt := createdAt.Add(inviteTimeout)
+	pending := &PendingInvite{
+		ID:        inviteID,
+		InviterID: inviterID,
+		InviteeID: inviteeID,
+		Message:   cleanMessage,
+		CreatedAt: createdAt,
+		ExpiresAt: expiresAt,
 	}
-	if err := a.sseManager.SendToClient(inviterID, EventUserInvited, selfPayload); err != nil {
-		fmt.Printf("ERROR: Failed to send invite confirmation to inviter %s: %v\n", inviterID, err)
-	}
+	a.pendingInvites[inviteID] = pending
 
-	// Notify the invitee via SSE so they can accept/decline
-	invitePayload := map[string]interface{}{
-		"roomId":   room.ID,
-		"roomName": room.Name,
-		"inviter":  inviter.Name,
+	payload := map[string]interface{}{
+		"inviteId":  inviteID,
+		"inviterId": inviter.ID,
+		"inviter":   inviter.Name,
+		"message":   cleanMessage,
+		"expiresAt": expiresAt.Unix(),
 	}
-	if err := a.sseManager.SendToClient(inviteeID, EventUserInvited, invitePayload); err != nil {
+	if err := a.sseManager.SendToClient(inviteeID, EventUserInvited, payload); err != nil {
+		delete(a.pendingInvites, inviteID)
 		fmt.Printf("ERROR: Failed to deliver invite to %s: %v\n", inviteeID, err)
-		return room.ID, fmt.Sprintf("Invite queued for %s but SSE delivery failed", invitee.Name)
+		return "", fmt.Sprintf("Invite queued for %s but SSE delivery failed", invitee.Name), 0
 	}
 
-	return room.ID, fmt.Sprintf("Invitation sent to %s for room %s", invitee.Name, room.Name)
+	return inviteID, fmt.Sprintf("Invitation sent to %s", invitee.Name), expiresAt.Unix()
 }
 
 // Helper function to check if slice contains string
@@ -434,6 +431,64 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// AcceptInvite converts a pending invite into an active room when the invitee accepts.
+func (a *App) AcceptInvite(inviteID, inviteeID string) (string, string) {
+	a.mu.Lock()
+	pending, exists := a.pendingInvites[inviteID]
+	if !exists {
+		a.mu.Unlock()
+		return "", "Error: Invite not found"
+	}
+
+	if pending.InviteeID != inviteeID {
+		a.mu.Unlock()
+		return "", "Error: Invite does not belong to this user"
+	}
+
+	if time.Now().After(pending.ExpiresAt) {
+		delete(a.pendingInvites, inviteID)
+		a.mu.Unlock()
+		return "", "Error: Invite expired"
+	}
+
+	inviter, inviterExists := a.users[pending.InviterID]
+	invitee, inviteeExists := a.users[pending.InviteeID]
+	if !inviterExists || !inviteeExists {
+		delete(a.pendingInvites, inviteID)
+		a.mu.Unlock()
+		return "", "Error: User not found"
+	}
+
+	if inviter.RoomID != nil || invitee.RoomID != nil {
+		delete(a.pendingInvites, inviteID)
+		a.mu.Unlock()
+		return "", "Error: One of the users is already in a room"
+	}
+
+	a.roomCounter++
+	roomID := fmt.Sprintf("room_%d", a.roomCounter)
+	room := &Room{
+		ID:      roomID,
+		Name:    fmt.Sprintf("Room %d", a.roomCounter),
+		UserIDs: []string{},
+	}
+	a.rooms[roomID] = room
+	delete(a.pendingInvites, inviteID)
+	a.mu.Unlock()
+
+	joinInviter := a.JoinRoom(inviter.ID, roomID)
+	if strings.HasPrefix(joinInviter, "Error") {
+		return "", joinInviter
+	}
+
+	joinInvitee := a.JoinRoom(invitee.ID, roomID)
+	if strings.HasPrefix(joinInvitee, "Error") {
+		return "", joinInvitee
+	}
+
+	return roomID, fmt.Sprintf("Room %s ready for collaboration", roomID)
 }
 
 func (a *App) emitClipboardPermissionEvent(granted bool, message string) {
@@ -536,7 +591,20 @@ func (a *App) startCleanupTasks(ctx context.Context) {
 		}
 	}()
 
-	fmt.Printf("Started cleanup tasks: room cleanup every %v\n", roomCleanupInterval)
+	inviteTicker := time.NewTicker(10 * time.Second)
+	go func() {
+		defer inviteTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-inviteTicker.C:
+				a.cleanupExpiredInvites()
+			}
+		}
+	}()
+
+	fmt.Printf("Started cleanup tasks: room cleanup every %v, invite cleanup every 10s\n", roomCleanupInterval)
 }
 
 // cleanupEmptyRooms removes rooms with no active users
@@ -559,6 +627,22 @@ func (a *App) cleanupEmptyRooms() {
 
 	if len(roomsToDelete) > 0 {
 		fmt.Printf("Cleanup completed: removed %d empty rooms\n", len(roomsToDelete))
+	}
+}
+
+func (a *App) cleanupExpiredInvites() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if len(a.pendingInvites) == 0 {
+		return
+	}
+
+	now := time.Now()
+	for id, invite := range a.pendingInvites {
+		if now.After(invite.ExpiresAt) {
+			delete(a.pendingInvites, id)
+		}
 	}
 }
 
@@ -773,6 +857,7 @@ func (a *App) StartHTTPServer(port string) {
 	http.HandleFunc("/api/users/", a.handleUserByID)
 	http.HandleFunc("/api/rooms", a.handleRooms)
 	http.HandleFunc("/api/invite", a.handleInvite)
+	http.HandleFunc("/api/invite/accept", a.handleAcceptInvite)
 	http.HandleFunc("/api/join", a.handleJoinRoom)
 	http.HandleFunc("/api/chat", a.handleChat)
 	http.HandleFunc("/api/chat/", a.handleChat)

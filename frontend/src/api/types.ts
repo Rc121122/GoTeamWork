@@ -23,12 +23,16 @@ export interface ChatMessage {
 export interface ApiMessageResponse {
   message: string;
   roomId?: string;
+  inviteId?: string;
+  expiresAt?: number;
 }
 
 export interface InviteEventPayload {
-  roomId: string;
-  roomName: string;
+  inviteId: string;
+  inviterId: string;
   inviter: string;
+  message: string;
+  expiresAt: number;
 }
 
 export interface SSEEnvelope<T> {
@@ -44,6 +48,12 @@ export interface CreateUserRequest {
 export interface InviteUserRequest {
   userId: string;
   inviterId: string;
+  message: string;
+}
+
+export interface AcceptInviteRequest {
+  inviteId: string;
+  inviteeId: string;
 }
 
 export interface ChatMessageRequest {

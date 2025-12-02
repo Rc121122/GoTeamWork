@@ -39,7 +39,8 @@ Unless otherwise noted, responses are JSON. Request DTOs live in `types.go`.
 - `GET /api/users/{id}` → Retrieves a single user or returns `404`.
 - `GET /api/rooms` → `main.Room[]` describing current rooms.
 - `POST /api/rooms { name: string }` → Explicit room creation (host dashboards, tests).
-- `POST /api/invite { userId: string, inviterId: string }` → Sanitizes the payload, ensures/creates the inviter's room, and emits an SSE invite for the target user so they can accept via `/api/join`.
+- `POST /api/invite { userId: string, inviterId: string, message?: string }` → Sanitizes the payload, creates a 30-second pending invite, and emits an SSE payload for the target user. Returns `{ message, inviteId, expiresAt }`.
+- `POST /api/invite/accept { inviteId: string, inviteeId: string }` → Validates the pending invite, creates the room, and joins both inviter and invitee server-side before emitting `user_joined` events.
 - `POST /api/chat { roomId, userId, message }` → Persists a chat message and triggers SSE updates. Response `{ message: string }`.
 - `GET /api/chat/{roomId}` → Historical chat transcript (`main.ChatMessage[]`).
 - `POST /api/leave { userId: string }` → Removes the user from their room and may tear down the room. Response `{ message: string }`.
@@ -53,7 +54,7 @@ Unless otherwise noted, responses are JSON. Request DTOs live in `types.go`.
     - `user_created` → `main.User`
     - `room_created` → `main.Room`
     - `room_deleted` → `{ roomId, roomName }`
-    - `user_invited` → `{ roomId, roomName, inviter }`
+    - `user_invited` → `{ inviteId, inviterId, inviter, message, expiresAt }`
     - `user_joined` → `{ roomId, roomName, userId, userName }`
     - `user_left` → `{ roomId, roomName, userId, userName }`
     - `chat_message` → `main.ChatMessage`
@@ -93,7 +94,10 @@ export interface ChatMessage {
 { "name": string }
 
 // POST /api/invite
-{ "userId": string }
+{ "userId": string, "inviterId": string, "message"?: string }
+
+// POST /api/invite/accept
+{ "inviteId": string, "inviteeId": string }
 
 // POST /api/chat
 { "roomId": string, "userId": string, "message": string }
@@ -105,7 +109,7 @@ export interface ChatMessage {
 { "name": string }
 
 // Generic success envelope
-{ "message": string }
+{ "message": string, "roomId"?: string, "inviteId"?: string, "expiresAt"?: number }
 ```
 
 ## Quick Usage Example

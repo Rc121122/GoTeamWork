@@ -1,6 +1,9 @@
 package main
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // User represents a user in the system
 type User struct {
@@ -83,6 +86,12 @@ type CreateUserRequest struct {
 type InviteUserRequest struct {
 	UserID    string `json:"userId"`
 	InviterID string `json:"inviterId"` // The user who is sending the invite
+	Message   string `json:"message,omitempty"`
+}
+
+type AcceptInviteRequest struct {
+	InviteID  string `json:"inviteId"`
+	InviteeID string `json:"inviteeId"`
 }
 
 type ChatMessageRequest struct {
@@ -105,6 +114,17 @@ type CreateRoomRequest struct {
 }
 
 type APIResponse struct {
-	Message string `json:"message"`
-	RoomID  string `json:"roomId,omitempty"` // Room ID if applicable
+	Message   string `json:"message"`
+	RoomID    string `json:"roomId,omitempty"`   // Room ID if applicable
+	InviteID  string `json:"inviteId,omitempty"` // Invite ID if applicable
+	ExpiresAt int64  `json:"expiresAt,omitempty"`
+}
+
+type PendingInvite struct {
+	ID        string    `json:"id"`
+	InviterID string    `json:"inviterId"`
+	InviteeID string    `json:"inviteeId"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }

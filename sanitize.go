@@ -10,6 +10,7 @@ const (
 	maxRoomNameLen      = 64
 	maxChatMessageLen   = 2000
 	maxClipboardTextLen = 4000
+	maxInviteMessageLen = 280
 )
 
 // sanitizePlainText trims whitespace, normalizes CRLF -> LF, strips control/format/private/non-character runes,
@@ -66,6 +67,10 @@ func sanitizeRoomName(name string) string {
 
 func sanitizeChatMessage(msg string) string {
 	return sanitizePlainText(msg, maxChatMessageLen)
+}
+
+func sanitizeInviteMessage(msg string) string {
+	return sanitizePlainText(msg, maxInviteMessageLen)
 }
 
 func sanitizeClipboardText(text string) string {

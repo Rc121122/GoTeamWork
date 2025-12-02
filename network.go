@@ -120,9 +120,13 @@ func (n *NetworkClient) CreateUser(name string) (*User, error) {
 	return &user, nil
 }
 
-// SendInvite sends an invitation to another user
-func (n *NetworkClient) SendInvite(userID string) (string, error) {
-	reqBody := map[string]string{"userId": userID}
+// SendInvite sends an invitation to another user with a custom message
+func (n *NetworkClient) SendInvite(inviteeID, inviterID, message string) (string, error) {
+	reqBody := map[string]string{
+		"userId":    inviteeID,
+		"inviterId": inviterID,
+		"message":   message,
+	}
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal request: %w", err)

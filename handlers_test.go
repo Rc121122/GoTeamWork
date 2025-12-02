@@ -98,6 +98,7 @@ func TestHandleInviteJoinChatLeaveFlow(t *testing.T) {
 	inviteBody := bytes.NewReader(mustLoadTestJSON(t, "invite_request_template.json", map[string]string{
 		"userId":    invitee.ID,
 		"inviterId": inviter.ID,
+		"message":   "Ready to collaborate?",
 	}))
 	req := httptest.NewRequest(http.MethodPost, "/api/invite", inviteBody)
 	req.Header.Set("Content-Type", "application/json")
@@ -108,11 +109,14 @@ func TestHandleInviteJoinChatLeaveFlow(t *testing.T) {
 	}
 
 	inviteResp := decodeResponseBody[APIResponse](t, rr)
-	if inviteResp.RoomID == "" {
-		t.Fatalf("expected room ID in invite response")
+	if inviteResp.InviteID == "" {
+		t.Fatalf("expected invite ID in invite response")
+	}
+	if inviteResp.ExpiresAt == 0 {
+		t.Fatalf("expected expiry timestamp in invite response")
 	}
 
-	roomID := inviteResp.RoomID
+	inviteID := inviteResp.InviteID
 	if events := inviteeConn.Events(); len(events) == 0 {
 		t.Fatalf("expected SSE invite for invitee")
 	}
@@ -120,23 +124,29 @@ func TestHandleInviteJoinChatLeaveFlow(t *testing.T) {
 	inviterConn.Reset()
 	inviteeConn.Reset()
 
-	joinBody := bytes.NewReader(mustLoadTestJSON(t, "join_request_template.json", map[string]string{
-		"userId": invitee.ID,
-		"roomId": roomID,
+	acceptBody := bytes.NewReader(mustLoadTestJSON(t, "accept_invite_template.json", map[string]string{
+		"inviteId":  inviteID,
+		"inviteeId": invitee.ID,
 	}))
-	req = httptest.NewRequest(http.MethodPost, "/api/join", joinBody)
+	req = httptest.NewRequest(http.MethodPost, "/api/invite/accept", acceptBody)
 	req.Header.Set("Content-Type", "application/json")
 	rr = httptest.NewRecorder()
-	app.handleJoinRoom(rr, req)
+	app.handleAcceptInvite(rr, req)
 	if rr.Code != http.StatusOK {
-		t.Fatalf("POST /api/join expected 200, got %d", rr.Code)
+		t.Fatalf("POST /api/invite/accept expected 200, got %d", rr.Code)
 	}
 
+	acceptResp := decodeResponseBody[APIResponse](t, rr)
+	if acceptResp.RoomID == "" {
+		t.Fatalf("expected room ID after accepting invite")
+	}
+	roomID := acceptResp.RoomID
+
 	if _, ok := findEvent(inviterConn.Events(), EventUserJoined); !ok {
-		t.Fatalf("inviter should be notified about join")
+		t.Fatalf("inviter should receive joined event when room is created")
 	}
 	if _, ok := findEvent(inviteeConn.Events(), EventUserJoined); !ok {
-		t.Fatalf("joiner should be notified about join")
+		t.Fatalf("invitee should receive joined event")
 	}
 
 	inviterConn.Reset()

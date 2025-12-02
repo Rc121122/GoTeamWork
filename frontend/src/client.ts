@@ -7,12 +7,14 @@ import {
   httpCreateUser,
   httpFetchChatHistory,
   httpFetchUsers,
+  httpAcceptInvite,
   httpInviteUser,
-  httpJoinRoom,
   httpLeaveRoom,
   httpSendChatMessage,
 } from "./api/httpClient";
 import type { ChatMessage, CopiedItem, InviteEventPayload, User } from "./api/types";
+
+let activeInviteTarget: User | null = null;
 
 export function renderClientUI(): void {
   renderUsernameInput();
@@ -95,19 +97,7 @@ function renderUsernameInput(): void {
 
 function handleInvite(payload: InviteEventPayload): void {
   console.log("Received invite event:", payload);
-  
-  // If inviter is "Self", this user sent the invite - auto-join
-  if (payload.inviter === "Self") {
-    console.log("Auto-joining room as inviter:", payload.roomId);
-    if (globalState.currentUser) {
-      globalState.currentUser.roomId = payload.roomId;
-    }
-    renderRoomView();
-    return;
-  }
 
-  // Otherwise, show invite modal for the invitee
-  console.log("Showing invite modal for invitee");
   const modal = document.getElementById("invite-modal");
   const acceptBtn = document.getElementById("accept-invite");
   const declineBtn = document.getElementById("decline-invite");
@@ -117,32 +107,63 @@ function handleInvite(payload: InviteEventPayload): void {
     return;
   }
 
-  messageDiv.textContent = `${payload.inviter} has invited you to join room "${payload.roomName}"!`;
+  messageDiv.innerHTML = `<strong>${payload.inviter}</strong> says:<br/>${payload.message}`;
   (modal as HTMLElement).style.display = "flex";
 
   acceptBtn.onclick = () => {
-    (modal as HTMLElement).style.display = "none";
-    if (globalState.currentUser) {
-      globalState.currentUser.roomId = payload.roomId;
-      // Notify the server that this user has joined the room
-      void joinRoom(globalState.currentUser.id, payload.roomId);
-    }
-    renderRoomView();
+    void acceptInvite(payload);
   };
 
   declineBtn.onclick = () => {
     (modal as HTMLElement).style.display = "none";
-    void leaveRoom();
   };
+}
+
+async function acceptInvite(payload: InviteEventPayload): Promise<void> {
+  const currentUser = globalState.currentUser;
+  const modal = document.getElementById("invite-modal");
+  const acceptBtn = document.getElementById("accept-invite");
+
+  if (!currentUser || !modal || !acceptBtn) {
+    return;
+  }
+
+  if (globalState.isProcessingAction) {
+    return;
+  }
+
+  globalState.isProcessingAction = true;
+  acceptBtn.setAttribute("disabled", "true");
+
+  try {
+    await httpAcceptInvite({ inviteId: payload.inviteId, inviteeId: currentUser.id });
+    (modal as HTMLElement).style.display = "none";
+  } catch (error) {
+    console.error("Failed to accept invite", error);
+    window.alert("Unable to accept invite. It may have expired.");
+  } finally {
+    globalState.isProcessingAction = false;
+    acceptBtn.removeAttribute("disabled");
+  }
 }
 
 function handleUserJoined(payload: { roomId: string; roomName: string; userId: string; userName: string }): void {
   console.log("User joined event:", payload);
-  
-  // If this event is for our current room, refresh the view or show notification
-  if (globalState.currentUser?.roomId === payload.roomId) {
-    console.log(`${payload.userName} joined the room!`);
-    // You could show a notification here or update a user list in the room
+
+  const currentUser = globalState.currentUser;
+  if (!currentUser) {
+    return;
+  }
+
+  if (payload.userId === currentUser.id) {
+    globalState.currentUser = { ...currentUser, roomId: payload.roomId };
+    clearPendingInvite();
+    renderRoomView();
+    return;
+  }
+
+  if (currentUser.roomId === payload.roomId) {
+    console.log(`${payload.userName} joined your room.`);
   }
 }
 
@@ -204,9 +225,170 @@ function renderWaitingLobby(): void {
         </div>
       </div>
     </div>
+
+    <div id="invite-compose-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <h2>Customize Invite</h2>
+        <p id="invite-target-name">Send a quick note.</p>
+        <textarea id="invite-message-input" class="invite-message-input" maxlength="280"></textarea>
+        <div class="modal-buttons">
+          <button id="send-invite-message" class="accept-btn">Send Invite</button>
+          <button id="cancel-invite-message" class="decline-btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="invite-pending-modal" class="modal" style="display: none;">
+      <div class="modal-content pending-modal">
+        <h2>Waiting for response</h2>
+        <p id="pending-invite-text"></p>
+        <div class="invite-countdown">
+          <span id="invite-countdown">30</span>s remaining
+        </div>
+      </div>
+    </div>
   `;
 
+  setupInviteModals();
   void updateUserList();
+}
+
+function setupInviteModals(): void {
+  const sendButton = document.getElementById("send-invite-message");
+  const cancelButton = document.getElementById("cancel-invite-message");
+
+  sendButton?.addEventListener("click", () => {
+    if (!activeInviteTarget) {
+      return;
+    }
+
+    const textarea = document.getElementById("invite-message-input") as HTMLTextAreaElement | null;
+    const message = textarea?.value.trim() || buildDefaultInviteMessage();
+    void sendInviteRequest(activeInviteTarget, message);
+  });
+
+  cancelButton?.addEventListener("click", () => {
+    closeInviteComposeModal();
+  });
+}
+
+function buildDefaultInviteMessage(): string {
+  const name = globalState.currentUser?.name ?? "me";
+  return `Hi, it's me, ${name}.`;
+}
+
+function openInviteComposeModal(target: User): void {
+  if (globalState.pendingInvite) {
+    window.alert("You already have a pending invite.");
+    return;
+  }
+
+  const modal = document.getElementById("invite-compose-modal");
+  const targetName = document.getElementById("invite-target-name");
+  const textarea = document.getElementById("invite-message-input") as HTMLTextAreaElement | null;
+
+  if (!modal || !targetName || !textarea) {
+    return;
+  }
+
+  activeInviteTarget = target;
+  targetName.textContent = `Invite ${target.name}`;
+  textarea.value = buildDefaultInviteMessage();
+  (modal as HTMLElement).style.display = "flex";
+  window.setTimeout(() => textarea.focus(), 0);
+}
+
+function closeInviteComposeModal(): void {
+  const modal = document.getElementById("invite-compose-modal");
+  if (modal) {
+    (modal as HTMLElement).style.display = "none";
+  }
+  activeInviteTarget = null;
+}
+
+async function sendInviteRequest(target: User, message: string): Promise<void> {
+  const currentUser = globalState.currentUser;
+  if (!currentUser) {
+    window.alert("You must be logged in to invite users");
+    return;
+  }
+
+  closeInviteComposeModal();
+
+  try {
+    const response = await httpInviteUser({ userId: target.id, inviterId: currentUser.id, message });
+    if (!response.inviteId) {
+      window.alert(response.message);
+      return;
+    }
+    startPendingInviteState(response.inviteId, target, response.expiresAt);
+    window.alert(response.message);
+  } catch (error) {
+    console.error("Error inviting user", error);
+    window.alert("Failed to send invitation");
+  }
+}
+
+function startPendingInviteState(inviteId: string, invitee: User, expiresAt?: number): void {
+  clearPendingInvite();
+
+  const modal = document.getElementById("invite-pending-modal");
+  const countdown = document.getElementById("invite-countdown");
+  const text = document.getElementById("pending-invite-text");
+
+  if (!modal || !countdown || !text) {
+    return;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const fallbackExpiry = now + 30;
+  const targetExpiry = expiresAt && expiresAt > 0 ? expiresAt : fallbackExpiry;
+  let remaining = Math.max(0, targetExpiry - now);
+
+  text.textContent = `Waiting for ${invitee.name} to respond...`;
+  countdown.textContent = remaining.toString().padStart(2, "0");
+  (modal as HTMLElement).style.display = "flex";
+
+  const timerId = window.setInterval(() => {
+    remaining -= 1;
+    countdown.textContent = Math.max(0, remaining).toString().padStart(2, "0");
+
+    if (remaining <= 0) {
+      clearPendingInvite(true);
+    }
+  }, 1000);
+
+  globalState.pendingInvite = {
+    inviteId,
+    inviteeId: invitee.id,
+    expiresAt: targetExpiry,
+    countdownTimerId: timerId,
+  };
+
+  void updateUserList();
+}
+
+function clearPendingInvite(expired = false): void {
+  if (globalState.pendingInvite?.countdownTimerId) {
+    window.clearInterval(globalState.pendingInvite.countdownTimerId);
+  }
+
+  globalState.pendingInvite = null;
+
+  const modal = document.getElementById("invite-pending-modal");
+  if (modal) {
+    (modal as HTMLElement).style.display = "none";
+  }
+
+  if (expired) {
+    window.alert("Invite expired without response.");
+  }
+
+  void updateUserList();
+}
+
+function promptInviteMessage(user: User): void {
+  openInviteComposeModal(user);
 }
 
 async function updateUserList(): Promise<void> {
@@ -227,6 +409,7 @@ function renderUserList(users: User[]): void {
   clearChildren(userListDiv);
 
   const otherUsers = users.filter((user) => user.id !== globalState.currentUser?.id);
+  const allowInvites = !globalState.pendingInvite;
 
   if (otherUsers.length === 0) {
     userListDiv.innerHTML = '<p class="empty">No other users online</p>';
@@ -235,55 +418,11 @@ function renderUserList(users: User[]): void {
 
   otherUsers.forEach((user) => {
     const item = createUserListItem(user, {
-      showInviteButton: !user.roomId,
-      onInvite: (target) => {
-        void inviteUser(target.id, target.name);
-      },
+      showInviteButton: allowInvites && !user.roomId,
+      onInvite: promptInviteMessage,
     });
     userListDiv.appendChild(item);
   });
-}
-
-async function inviteUser(userId: string, userName: string): Promise<void> {
-  const currentUser = globalState.currentUser;
-  if (!currentUser) {
-    window.alert("You must be logged in to invite users");
-    return;
-  }
-
-  console.log(`Inviting user ${userName} (${userId}) from ${currentUser.name} (${currentUser.id})`);
-
-  try {
-    const response = await httpInviteUser({ 
-      userId,
-      inviterId: currentUser.id 
-    });
-    
-    console.log(`Invite response:`, response);
-    
-    // If roomId is returned, update current user and render room view
-    if (response.roomId) {
-      console.log(`Updating currentUser.roomId to ${response.roomId}`);
-      globalState.currentUser = { ...currentUser, roomId: response.roomId };
-      console.log(`Waiting for SSE event to render room view...`);
-      // Note: We'll receive SSE event to actually render the room
-      // The SSE event handler will call renderRoomView()
-    }
-    
-    window.alert(response.message);
-  } catch (error) {
-    console.error("Error inviting user", error);
-    window.alert("Failed to send invitation");
-  }
-}
-
-async function joinRoom(userId: string, roomId: string): Promise<void> {
-  try {
-    const response = await httpJoinRoom({ userId, roomId });
-    console.log("Join room response:", response);
-  } catch (error) {
-    console.error("Error joining room", error);
-  }
 }
 
 async function leaveRoom(): Promise<void> {

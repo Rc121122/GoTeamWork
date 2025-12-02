@@ -172,7 +172,44 @@ func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roomID, result := a.InviteWithRoom(req.UserID, req.InviterID)
+	inviteID, result, expiresAt := a.InviteWithRoom(req.UserID, req.InviterID, req.Message)
+	response := APIResponse{Message: result, InviteID: inviteID, ExpiresAt: expiresAt}
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleAcceptInvite handles POST /api/invite/accept
+func (a *App) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req AcceptInviteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.InviteID == "" || req.InviteeID == "" {
+		http.Error(w, "inviteId and inviteeId are required", http.StatusBadRequest)
+		return
+	}
+
+	roomID, result := a.AcceptInvite(req.InviteID, req.InviteeID)
+	status := http.StatusOK
+	if strings.HasPrefix(result, "Error") {
+		status = http.StatusBadRequest
+	}
+	w.WriteHeader(status)
 	response := APIResponse{Message: result, RoomID: roomID}
 	json.NewEncoder(w).Encode(response)
 }
