@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
@@ -182,7 +180,6 @@ func (hp *HistoryPool) GetCurrentClipboardItems(roomID string) []*ClipboardItem 
 
 // App struct
 type App struct {
-	ctx            context.Context
 	Mode           string
 	users          map[string]*User
 	rooms          map[string]*Room
@@ -201,16 +198,13 @@ type App struct {
 	pendingClipboardMu    sync.Mutex
 	pendingClipboardItem  *ClipboardItem
 	pendingClipboardAt    time.Time
+
+	ctx context.Context
 }
 
-const (
-	wailsEventClipboardShowButton = "clipboard:show-share-button"
-	wailsEventClipboardPermission = "clipboard:permission-state"
-)
-
-// NewApp creates a new App application struct
+// NewApp creates a new App service struct
 func NewApp(mode string) *App {
-	app := &App{
+	service := &App{
 		Mode:           mode,
 		users:          make(map[string]*User),
 		rooms:          make(map[string]*Room),
@@ -220,25 +214,19 @@ func NewApp(mode string) *App {
 	}
 
 	// Initialize with a default current user for host mode
-	// Note: host user is NOT added to users map, so it won't appear in user lists
 	if mode == "host" {
-		app.currentUser = &User{
+		service.currentUser = &User{
 			ID:       "host",
 			Name:     "Host Server",
 			IsOnline: true,
 		}
-		// DO NOT add host to users map - host is not a regular user
-		// Host manages the server but doesn't participate in rooms
-	} else if mode == "client" {
-		// Client mode will set currentUser when user logs in
 	}
 
-	return app
+	return service
 }
 
-// startup is called when the app starts. The context is saved
-// so we can call the runtime methods
-func (a *App) startup(ctx context.Context) {
+// Start bootstraps the application for the selected mode.
+func (a *App) Start(ctx context.Context) error {
 	a.ctx = ctx
 	fmt.Printf("Starting in %s mode\n", a.Mode)
 
@@ -269,6 +257,8 @@ func (a *App) startup(ctx context.Context) {
 
 	// Start clipboard monitoring for copy hotkey
 	a.StartClipboardMonitor()
+
+	return nil
 }
 
 // Greet returns a greeting for the given name
@@ -492,29 +482,15 @@ func (a *App) AcceptInvite(inviteID, inviteeID string) (string, string) {
 }
 
 func (a *App) emitClipboardPermissionEvent(granted bool, message string) {
-	if a.ctx == nil {
+	if message != "" {
+		fmt.Printf("Clipboard permission: granted=%t message=%s\n", granted, message)
 		return
 	}
-
-	payload := map[string]interface{}{
-		"granted": granted,
-	}
-	if message != "" {
-		payload["message"] = message
-	}
-
-	runtime.EventsEmit(a.ctx, wailsEventClipboardPermission, payload)
+	fmt.Printf("Clipboard permission: granted=%t\n", granted)
 }
 
 func (a *App) emitClipboardButtonEvent(screenX, screenY int) {
-	if a.ctx == nil {
-		return
-	}
-
-	runtime.EventsEmit(a.ctx, wailsEventClipboardShowButton, map[string]int{
-		"screenX": screenX,
-		"screenY": screenY,
-	})
+	fmt.Printf("Clipboard button event at x=%d y=%d\n", screenX, screenY)
 }
 
 // CreateUser creates a new user in the system

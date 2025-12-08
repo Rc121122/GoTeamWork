@@ -297,7 +297,7 @@ func (a *App) ShareSystemClipboard() (bool, error) {
 	return true, nil
 }
 
-// GetClipboardItem is a Wails-exposed function to manually get clipboard content
+// GetClipboardItem returns the current clipboard content
 func (a *App) GetClipboardItem() (*ClipboardItem, error) {
 	return ReadClipboard()
 }

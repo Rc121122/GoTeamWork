@@ -1,41 +1,25 @@
 package main
 
 import (
-	"embed"
+	"context"
 	"flag"
-
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
-//go:embed all:frontend/dist
-var assets embed.FS
-
 func main() {
-	// Parse command line flags
 	mode := flag.String("mode", "client", "Mode: 'host' for central-server host or 'client' for central-server client")
 	flag.Parse()
 
-	// Create an instance of the app structure
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	app := NewApp(*mode)
-
-	// Create application with options
-	err := wails.Run(&options.App{
-		Title:  "GOproject",
-		Width:  1024,
-		Height: 768,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-		},
-		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		OnStartup:        app.startup,
-		Bind: []interface{}{
-			app,
-		},
-	})
-
-	if err != nil {
-		println("Error:", err.Error())
+	if err := app.Start(ctx); err != nil {
+		log.Fatalf("failed to start application: %v", err)
 	}
+
+	<-ctx.Done()
 }
