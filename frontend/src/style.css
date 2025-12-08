@@ -1,0 +1,87 @@
+:root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #e8edf5;
+  background: radial-gradient(circle at 20% 20%, #223048, #121827 40%),
+    radial-gradient(circle at 80% 0%, #1e2b40, #0f1623 45%),
+    linear-gradient(135deg, #0b1220 0%, #0c1424 100%);
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+}
+
+#app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 32px;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+h1 {
+  margin: 0 0 12px;
+  letter-spacing: 0.4px;
+}
+
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+input,
+button,
+select {
+  font: inherit;
+}
+
+input {
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+  color: #e8edf5;
+}
+
+button {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(90deg, #4f8bff, #9a7bff);
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(79, 139, 255, 0.3);
+}
+
+pre {
+  background: #0f172a;
+  border-radius: 10px;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.small {
+  font-size: 12px;
+  opacity: 0.8;
+}

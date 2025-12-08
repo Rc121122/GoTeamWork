@@ -1,0 +1,44 @@
+# Wails v3 dev/build configuration
+version: '3'
+
+info:
+  companyName: "GOproject"
+  productName: "GOproject"
+  productIdentifier: "com.goproject.app"
+  description: "Collaboration helper"
+  copyright: "(c) 2025"
+  version: "0.1.0"
+
+# Refresh/watch engine config used by `wails3 dev`
+dev_mode:
+  root_path: .
+  log_level: info
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - node_modules
+      - frontend/node_modules
+      - bin
+    file:
+      - .DS_Store
+      - .gitignore
+    watched_extension:
+      - "*.go"
+      - "*.ts"
+      - "*.tsx"
+      - "*.js"
+      - "*.json"
+      - "*.css"
+    git_ignore: true
+  executes:
+    - cmd: "npm install"
+      dir: "frontend"
+      type: once
+    - cmd: "npm run dev -- --host --port 9245"
+      dir: "frontend"
+      type: background
+    - cmd: "sleep 2"
+      type: blocking
+    - cmd: "go run ."
+      type: primary

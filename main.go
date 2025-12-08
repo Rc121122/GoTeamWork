@@ -1,25 +1,41 @@
 package main
 
 import (
-	"context"
+	"embed"
 	"flag"
 	"log"
-	"os"
-	"os/signal"
-	"syscall"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+//go:embed frontend/dist
+var assets embed.FS
 
 func main() {
 	mode := flag.String("mode", "client", "Mode: 'host' for central-server host or 'client' for central-server client")
 	flag.Parse()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	wapp := application.New(application.Options{
+		Name:        "GOproject",
+		Description: "Collaboration helper",
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets),
+		},
+	})
 
-	app := NewApp(*mode)
-	if err := app.Start(ctx); err != nil {
-		log.Fatalf("failed to start application: %v", err)
+	service := NewApp(*mode)
+	service.wailsApp = wapp
+	wapp.RegisterService(application.NewService(service))
+
+	wapp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            "GOproject",
+		Width:            1280,
+		Height:           800,
+		BackgroundColour: application.NewRGB(27, 38, 54),
+		URL:              "/",
+	})
+
+	if err := wapp.Run(); err != nil {
+		log.Fatalf("failed to run Wails app: %v", err)
 	}
-
-	<-ctx.Done()
 }

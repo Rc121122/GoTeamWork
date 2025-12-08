@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 const (
@@ -199,7 +201,8 @@ type App struct {
 	pendingClipboardItem  *ClipboardItem
 	pendingClipboardAt    time.Time
 
-	ctx context.Context
+	ctx      context.Context
+	wailsApp *application.App
 }
 
 // NewApp creates a new App service struct
@@ -223,6 +226,11 @@ func NewApp(mode string) *App {
 	}
 
 	return service
+}
+
+// ServiceStartup is invoked by Wails when the service is registered.
+func (a *App) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+	return a.Start(ctx)
 }
 
 // Start bootstraps the application for the selected mode.

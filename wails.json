@@ -1,0 +1,12 @@
+{
+  "$schema": "https://wails.io/schemas/v3.json",
+  "name": "GOproject",
+  "description": "Collaboration helper rebuilt on Wails v3",
+  "frontend": {
+    "dir": "frontend",
+    "install": "npm install",
+    "build": "npm run build",
+    "dev": "npm run dev",
+    "devServerUrl": "http://localhost:5173"
+  }
+}
