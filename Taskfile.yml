@@ -1,0 +1,27 @@
+version: '3'
+
+vars:
+  BINARY_NAME: GOproject
+  FRONTEND_DIR: frontend
+  BIN_DIR: bin
+
+tasks:
+  build:
+    desc: Build frontend assets and Go binary
+    cmds:
+      - task: frontend-build
+      - task: backend-build
+
+  frontend-build:
+    desc: Install deps (if needed) and build Vite frontend
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm install
+      - npm run build
+
+  backend-build:
+    desc: Compile the Go binary with embedded frontend assets
+    cmds:
+      - mkdir -p "{{.BIN_DIR}}"
+      - go build -o "{{.BIN_DIR}}/{{.BINARY_NAME}}" .
+
