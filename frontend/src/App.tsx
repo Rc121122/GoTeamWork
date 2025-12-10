@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getAppMode } from './api/wailsBridge';
 import { EventsOn, WindowSetPosition, WindowSetSize, WindowShow, WindowSetAlwaysOnTop, WindowCenter, WindowUnmaximise, WindowReload } from '../wailsjs/runtime/runtime';
 import HUD from './components/HUD';
@@ -13,7 +13,7 @@ import { SettingsModal, AboutModal } from './components/Modals';
 import { AppState } from './types/fsm';
 import { User, Room, InviteEventPayload } from './api/types';
 import { connectSSE } from './sse';
-import { httpAcceptInvite } from './api/httpClient';
+import { httpAcceptInvite, httpFetchRooms } from './api/httpClient';
 import './app.css';
 
 function App() {
@@ -26,6 +26,20 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [pendingInvite, setPendingInvite] = useState<InviteEventPayload | null>(null);
+
+  const fetchAndJoinRoom = useCallback(async (roomId: string) => {
+    try {
+        const rooms = await httpFetchRooms();
+        const room = rooms.find(r => r.id === roomId);
+        if (room) {
+            console.log("Joining room:", room);
+            setCurrentRoom(room);
+            setState('ROOM');
+        }
+    } catch (e) {
+        console.error("Failed to fetch room details", e);
+    }
+  }, []);
 
   useEffect(() => {
     getAppMode().then((mode) => {
@@ -69,16 +83,8 @@ function App() {
         },
         onUserJoined: (payload) => {
           console.log("User joined room:", payload);
-          // If we joined a room (e.g. via invite accept), update state
           if (payload.userId === currentUser.id) {
-             // We need to fetch room details or just set state to ROOM
-             // For now, let's assume Lobby or Room component handles data fetch
-             // But we need to switch view
-             // Actually, onUserJoined is broadcasted.
-             // If *I* joined, I should switch to ROOM.
-             // But I don't have the full Room object here.
-             // Let's rely on the action that triggered join (e.g. accept invite) to set room?
-             // Or fetch room here.
+             void fetchAndJoinRoom(payload.roomId);
           }
         },
         onDisconnected: () => {
@@ -86,7 +92,7 @@ function App() {
         }
       });
     }
-  }, [appMode, currentUser]);
+  }, [appMode, currentUser, fetchAndJoinRoom]);
 
   const closeHUD = () => {
       setIsHUD(false);
@@ -122,20 +128,15 @@ function App() {
   const handleAcceptInvite = async () => {
     if (!pendingInvite || !currentUser) return;
     try {
-      await httpAcceptInvite({
+      const response = await httpAcceptInvite({
         inviteId: pendingInvite.inviteId,
         inviteeId: currentUser.id
       });
       setPendingInvite(null);
-      // After accepting, we should be joined to the room.
-      // The server will broadcast user_joined.
-      // We can fetch the room details or wait for Lobby to update?
-      // Better: Fetch the room we just joined.
-      // But we don't know the room ID from invite payload directly?
-      // Wait, invite payload doesn't have room ID.
-      // But accept invite returns something?
-      // Let's just close the modal for now and let the user see the room in Lobby or auto-join.
-      // Ideally, we should switch to ROOM view.
+      
+      if (response.roomId) {
+          void fetchAndJoinRoom(response.roomId);
+      }
     } catch (err) {
       console.error("Failed to accept invite", err);
       alert("Failed to accept invite");
