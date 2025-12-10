@@ -25,14 +25,6 @@ static CFArrayRef GetPasteboardFilePaths() {
                 continue;
             }
         }
-
-        id propertyList = [item propertyListForType:NSFilenamesPboardType];
-        if ([propertyList isKindOfClass:[NSArray class]] && [propertyList count] > 0) {
-            NSString *path = [propertyList firstObject];
-            if (path.length > 0) {
-                [paths addObject:path];
-            }
-        }
     }
 
     if (paths.count == 0) {

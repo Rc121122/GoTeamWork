@@ -9,14 +9,37 @@ import type {
 
 const API_BASE_URL = "http://localhost:8080";
 
-interface SSEHandlers {
-  onUserCreated?: (user: User) => void;
-  onUserOffline?: (payload: { userId: string }) => void;
-  onUserInvited?: (payload: InviteEventPayload) => void;
-  onUserJoined?: (payload: { roomId: string; roomName: string; userId: string; userName: string }) => void;
-  onChatMessage?: (message: ChatMessage) => void;
-  onClipboardCopied?: (item: CopiedItem) => void;
-  onDisconnected?: () => void;
+export type SSEEventType = 
+  | 'user_created' 
+  | 'user_offline' 
+  | 'user_invited' 
+  | 'user_joined' 
+  | 'chat_message' 
+  | 'clipboard_copied' 
+  | 'clipboard_updated'
+  | 'connected' 
+  | 'disconnected';
+
+type Listener<T = any> = (data: T) => void;
+
+const listeners: Record<string, Listener[]> = {};
+
+export function addSSEListener<T>(event: SSEEventType, callback: Listener<T>) {
+    if (!listeners[event]) {
+        listeners[event] = [];
+    }
+    listeners[event].push(callback);
+}
+
+export function removeSSEListener<T>(event: SSEEventType, callback: Listener<T>) {
+    if (!listeners[event]) return;
+    listeners[event] = listeners[event].filter(cb => cb !== callback);
+}
+
+function dispatch<T>(event: SSEEventType, data: T) {
+    if (listeners[event]) {
+        listeners[event].forEach(cb => cb(data));
+    }
 }
 
 function parseEnvelope<T>(event: MessageEvent<string>): T {
@@ -24,7 +47,13 @@ function parseEnvelope<T>(event: MessageEvent<string>): T {
   return parsed.data;
 }
 
-export function connectSSE(userId: string, handlers: SSEHandlers): void {
+export function connectSSE(userId: string): void {
+  // If already connected, close existing? Or just return?
+  // For now, let's close existing to be safe if userId changes
+  if (globalState.sseConnection) {
+      globalState.sseConnection.close();
+  }
+
   const url = `${API_BASE_URL}/api/sse?userId=${encodeURIComponent(userId)}`;
 
   const setup = (): void => {
@@ -32,47 +61,45 @@ export function connectSSE(userId: string, handlers: SSEHandlers): void {
     globalState.sseConnection = source;
 
     source.addEventListener("user_created", (event) => {
-      handlers.onUserCreated?.(parseEnvelope<User>(event as MessageEvent<string>));
+      dispatch('user_created', parseEnvelope<User>(event as MessageEvent<string>));
     });
 
     source.addEventListener("user_offline", (event) => {
-      handlers.onUserOffline?.(parseEnvelope<{ userId: string }>(event as MessageEvent<string>));
+      dispatch('user_offline', parseEnvelope<{ userId: string }>(event as MessageEvent<string>));
     });
 
     source.addEventListener("user_invited", (event) => {
       console.log("SSE user_invited event received:", event.data);
       const payload = parseEnvelope<InviteEventPayload>(event as MessageEvent<string>);
-      console.log("Parsed invite payload:", payload);
-      handlers.onUserInvited?.(payload);
+      dispatch('user_invited', payload);
     });
 
     source.addEventListener("user_joined", (event) => {
       console.log("SSE user_joined event received:", event.data);
       const payload = parseEnvelope<{ roomId: string; roomName: string; userId: string; userName: string }>(event as MessageEvent<string>);
-      console.log("Parsed join payload:", payload);
-      handlers.onUserJoined?.(payload);
+      dispatch('user_joined', payload);
     });
 
     source.addEventListener("chat_message", (event) => {
-      handlers.onChatMessage?.(parseEnvelope<ChatMessage>(event as MessageEvent<string>));
+      dispatch('chat_message', parseEnvelope<ChatMessage>(event as MessageEvent<string>));
     });
 
     source.addEventListener("clipboard_copied", (event) => {
-      handlers.onClipboardCopied?.(parseEnvelope<CopiedItem>(event as MessageEvent<string>));
+      dispatch('clipboard_copied', parseEnvelope<CopiedItem>(event as MessageEvent<string>));
     });
 
     source.addEventListener("connected", () => {
-      // Swallow connected confirmation; console logging available if needed.
+      dispatch('connected', null);
     });
 
     source.addEventListener("heartbeat", () => {
-      // Heartbeat ensures the connection stays active.
+      // Heartbeat
     });
 
     source.onerror = () => {
       source.close();
       globalState.sseConnection = null;
-      handlers.onDisconnected?.();
+      dispatch('disconnected', null);
       window.setTimeout(setup, 5000);
     };
   };

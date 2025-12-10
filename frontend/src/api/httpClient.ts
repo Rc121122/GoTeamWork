@@ -9,6 +9,7 @@ import type {
   LeaveRoomRequest,
   User,
   Room,
+  Operation,
 } from "./types";
 
 const API_BASE_URL = "http://localhost:8080";
@@ -96,3 +97,12 @@ export async function httpSendChatMessage(payload: ChatMessageRequest): Promise<
     body: JSON.stringify(payload),
   });
 }
+
+export async function httpFetchOperations(roomId: string, sinceId: string = ""): Promise<Operation[]> {
+  let url = `/api/operations/${roomId}`;
+  if (sinceId) {
+    url += `?since=${sinceId}`;
+  }
+  return request<Operation[]>(url);
+}
+

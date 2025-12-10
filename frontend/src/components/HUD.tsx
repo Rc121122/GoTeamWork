@@ -18,10 +18,21 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
     return () => clearTimeout(timer);
   }, [onClose]);
 
+  // Make body transparent for HUD
+  React.useEffect(() => {
+    const originalBackground = document.body.style.background;
+    document.body.style.background = 'transparent';
+    return () => {
+      document.body.style.background = originalBackground;
+    };
+  }, []);
+
   const handleClick = async () => {
     if (state === 'idle') {
       try {
-        await ShareSystemClipboard();
+        console.log("Sharing system clipboard...");
+        const result = await ShareSystemClipboard();
+        console.log("ShareSystemClipboard result:", result);
         setState('carry');
         // After sharing, we might want to close or wait.
         // For now, let's close after a short delay to indicate success
@@ -29,7 +40,7 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
             onClose();
         }, 1000);
       } catch (err) {
-        console.error(err);
+        console.error("Error sharing clipboard:", err);
       }
     } else {
         onClose();
@@ -50,7 +61,7 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
       <img 
         src={state === 'idle' ? gopherIdle : gopherCarry} 
         alt="Gopher" 
-        style={{ width: '100px', cursor: 'pointer', WebkitAppRegion: 'no-drag' } as React.CSSProperties} 
+        style={{ width: '100px', cursor: 'pointer', WebkitAppRegion: 'no-drag', backgroundColor: 'transparent' } as React.CSSProperties} 
         onClick={handleClick}
       />
     </div>

@@ -27,33 +27,13 @@ func ReadClipboard() (*ClipboardItem, error) {
 	// But if we copied files, clipboard.Read(clipboard.FmtText) might return the file names or empty.
 	// Let's check files first.
 	if filePaths := getFilePathsFromPasteboard(); len(filePaths) > 0 {
-		// Create a temp zip file
-		tmpFile, err := os.CreateTemp("", "clipboard_files_*.zip")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create temp zip file: %w", err)
-		}
-		defer os.Remove(tmpFile.Name()) // Clean up temp file after reading
-		defer tmpFile.Close()
-
-		if err := zipFiles(filePaths, tmpFile); err != nil {
-			return nil, fmt.Errorf("failed to zip files: %w", err)
-		}
-
-		// Read the zip file back into memory
-		// Reset offset
-		if _, err := tmpFile.Seek(0, 0); err != nil {
-			return nil, fmt.Errorf("failed to seek temp zip file: %w", err)
-		}
-
-		zipData, err := io.ReadAll(tmpFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read temp zip file: %w", err)
-		}
-
+		// Return immediately with file paths, zip in background if needed
+		// For now, we return the item with Files populated and empty ZipData.
+		// The caller (App.handleClipboardCopy) should handle the zipping asynchronously.
 		return &ClipboardItem{
-			Type:    ClipboardFile,
-			ZipData: zipData,
-			Text:    fmt.Sprintf("%d files compressed", len(filePaths)),
+			Type:  ClipboardFile,
+			Files: filePaths,
+			Text:  fmt.Sprintf("%d files selected", len(filePaths)),
 		}, nil
 	}
 
@@ -77,7 +57,7 @@ func ReadClipboard() (*ClipboardItem, error) {
 	return nil, fmt.Errorf("no supported clipboard content found")
 }
 
-func zipFiles(files []string, writer io.Writer) error {
+func ZipFiles(files []string, writer io.Writer) error {
 	zipWriter := zip.NewWriter(writer)
 	defer zipWriter.Close()
 

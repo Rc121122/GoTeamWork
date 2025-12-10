@@ -842,7 +842,8 @@ func (a *App) SendChatMessage(roomID, userID, message string) string {
 
 	// Add operation and notify consumers about the delta (not the entire history)
 	a.historyPool.AddOperation(roomID, OpAdd, msg.ID, item)
-	a.sseManager.BroadcastToUsers(members, EventChatMessage, msg, userID)
+	// Broadcast to all members including the sender (pass empty string as excludeUserID)
+	a.sseManager.BroadcastToUsers(members, EventChatMessage, msg, "")
 
 	fmt.Printf("Chat message from %s in room %s: %s\n", userName, roomID, safeMessage)
 	return fmt.Sprintf("Message sent: %s", msg.ID)
@@ -887,6 +888,9 @@ func (a *App) StartHTTPServer(port string) {
 	http.HandleFunc("/api/chat", a.handleChat)
 	http.HandleFunc("/api/chat/", a.handleChat)
 	http.HandleFunc("/api/operations/", a.handleOperations)
+	http.HandleFunc("/api/download/", a.handleDownload)
+	http.HandleFunc("/api/clipboard", a.handleClipboardUpload)
+	http.HandleFunc("/api/clipboard/", a.handleZipUpload)
 	http.HandleFunc("/api/leave", a.handleLeave)
 	http.HandleFunc("/api/sse", a.handleSSE)
 

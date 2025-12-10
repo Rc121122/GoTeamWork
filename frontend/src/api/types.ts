@@ -76,9 +76,23 @@ export interface CreateRoomRequest {
 }
 
 export interface CopiedItem {
-  type: "text" | "image";
+  type: "text" | "image" | "file";
   text?: string;
   image?: string; // base64 encoded
+  files?: string[]; // file paths
+}
+
+export interface Operation {
+  id: string;
+  parentId: string;
+  opType: string;
+  itemId: string;
+  item: {
+    id: string;
+    type: string;
+    data: ChatMessage | CopiedItem;
+  };
+  timestamp: number;
 }
 
 export type AppMode = "host" | "client";

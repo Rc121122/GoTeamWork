@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { hostSendChatMessage, hostFetchChatHistory, hostLeaveRoom } from '../api/wailsBridge';
-import { httpSendChatMessage, httpFetchChatHistory, httpLeaveRoom } from '../api/httpClient';
-import { ChatMessage, Room } from '../api/types';
+import { hostSendChatMessage, hostFetchChatHistory, hostLeaveRoom, hostFetchOperations } from '../api/wailsBridge';
+import { httpSendChatMessage, httpFetchChatHistory, httpLeaveRoom, httpFetchOperations } from '../api/httpClient';
+import { ChatMessage, Room, Operation, CopiedItem } from '../api/types';
+import { addSSEListener, removeSSEListener } from '../sse';
+import { BrowserOpenURL } from '../../wailsjs/runtime/runtime';
 
 interface RoomProps {
   currentUser: { id: string; name: string };
@@ -12,6 +14,7 @@ interface RoomProps {
 
 const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appMode }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [operations, setOperations] = useState<Operation[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -29,10 +32,80 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
     }
   };
 
+  const refreshOperations = async () => {
+    try {
+      let ops: Operation[];
+      const roomIdToFetch = "global"; 
+      
+      if (appMode === 'client') {
+        ops = await httpFetchOperations(roomIdToFetch);
+      } else {
+        ops = await hostFetchOperations(roomIdToFetch);
+      }
+      // Filter for clipboard items only
+      const clipboardOps = ops.filter(op => op.item.type === 'clipboard');
+      setOperations(clipboardOps);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   useEffect(() => {
     refreshChat();
-    const interval = setInterval(refreshChat, 1000); // Poll chat
-    return () => clearInterval(interval);
+    refreshOperations();
+
+    const onChatMsg = (msg: ChatMessage) => {
+        if (msg.roomId === currentRoom.id) {
+            setMessages(prev => [...prev, msg]);
+        }
+    };
+
+    const onClipboard = (payload: CopiedItem | Operation) => {
+        console.log("Received clipboard payload via SSE:", payload);
+        
+        let newOp: Operation;
+
+        // Check if payload is an Operation
+        if ('opType' in payload && 'item' in payload) {
+             newOp = payload as Operation;
+        } else {
+             // Fallback for direct item broadcast
+             const item = payload as CopiedItem;
+             newOp = {
+                id: `temp_${Date.now()}`,
+                parentId: "",
+                opType: "add",
+                itemId: `temp_item_${Date.now()}`,
+                item: {
+                    id: `temp_item_${Date.now()}`,
+                    type: "clipboard",
+                    data: item
+                },
+                timestamp: Date.now() / 1000
+            };
+        }
+        setOperations(prev => [...prev, newOp]);
+    };
+
+    const onClipboardUpdated = (op: Operation) => {
+        console.log("Received clipboard update via SSE:", op);
+        setOperations(prev => prev.map(o => {
+            if (o.id === op.id || o.itemId === op.itemId) {
+                return op;
+            }
+            return o;
+        }));
+    };
+
+    addSSEListener('chat_message', onChatMsg);
+    addSSEListener('clipboard_copied', onClipboard);
+    addSSEListener('clipboard_updated', onClipboardUpdated);
+
+    return () => {
+        removeSSEListener('chat_message', onChatMsg);
+        removeSSEListener('clipboard_copied', onClipboard);
+        removeSSEListener('clipboard_updated', onClipboardUpdated);
+    };
   }, [currentRoom.id]);
 
   useEffect(() => {
@@ -49,7 +122,7 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
         await hostSendChatMessage(currentRoom.id, currentUser.id, newMessage);
       }
       setNewMessage('');
-      refreshChat();
+      // refreshChat(); // No longer needed as we receive our own message via SSE
     } catch (err) {
       console.error(err);
     }
@@ -66,6 +139,72 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
       } catch (err) {
           console.error("Failed to leave room", err);
       }
+  };
+
+  const renderClipboardItem = (op: Operation) => {
+      const item = op.item.data as CopiedItem;
+      if (!item) {
+          console.log("Clipboard item data is null for operation:", op.id);
+          return null;
+      }
+
+      console.log("Rendering clipboard item:", item.type, item);
+
+      return (
+          <div key={op.id} style={{ background: 'white', color: 'black', padding: '10px', borderRadius: '5px', width: '100%', marginBottom: '10px' }}>
+              <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '5px', display: 'flex', alignItems: 'center' }}>
+                  <span style={{ marginRight: '5px' }}>
+                      {item.type === 'text' ? '📄' : item.type === 'image' ? '🖼️' : item.type === 'file' ? '📁' : '❓'}
+                  </span>
+                  {new Date(op.timestamp * 1000).toLocaleTimeString()}
+              </div>
+              {item.type === 'text' && (
+                  <div style={{ whiteSpace: 'pre-wrap', maxHeight: '100px', overflowY: 'auto' }}>
+                      {item.text}
+                  </div>
+              )}
+              {item.type === 'image' && item.image && (
+                  <img src={`data:image/png;base64,${item.image}`} alt="Clipboard" style={{ maxWidth: '100%', maxHeight: '150px' }} />
+              )}
+              {item.type === 'file' && item.files && (
+                  <div>
+                      <strong>Files:</strong>
+                      <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                          {item.files.map((file, idx) => (
+                              <li key={idx} style={{ fontSize: '0.9rem' }}>{file}</li>
+                          ))}
+                      </ul>
+                      <div style={{ marginTop: '10px' }}>
+                          {item.text && item.text.includes('(ready)') ? (
+                              <a 
+                                  href="#"
+                                  onClick={(e) => {
+                                      e.preventDefault();
+                                      BrowserOpenURL(`http://localhost:8080/api/download/${op.id}`);
+                                  }}
+                                  style={{
+                                      display: 'inline-block',
+                                      padding: '5px 10px',
+                                      background: '#3498db',
+                                      color: 'white',
+                                      textDecoration: 'none',
+                                      borderRadius: '3px',
+                                      fontSize: '0.9rem',
+                                      cursor: 'pointer'
+                                  }}
+                              >
+                                  Download Zip
+                              </a>
+                          ) : (
+                              <span style={{ color: '#888', fontSize: '0.9rem' }}>
+                                  Compressing files...
+                              </span>
+                          )}
+                      </div>
+                  </div>
+              )}
+          </div>
+      );
   };
 
   return (
@@ -97,13 +236,16 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
       </div>
 
       {/* Right Column: Shared Clipboard */}
-      <div style={{ flex: 1, padding: '10px', background: '#2c3e50' }}>
+      <div style={{ flex: 1, padding: '10px', background: '#2c3e50', overflowY: 'auto' }}>
         <h3>Shared Clipboard</h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
-          {/* Placeholder for clipboard cards */}
-          <div style={{ background: 'white', color: 'black', padding: '10px', borderRadius: '5px', width: '100%' }}>
-            <p>Clipboard history will appear here...</p>
-          </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {operations.length === 0 ? (
+             <div style={{ background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '5px' }}>
+                <p>No shared items yet.</p>
+             </div>
+          ) : (
+              operations.slice().reverse().map(renderClipboardItem)
+          )}
         </div>
       </div>
     </div>

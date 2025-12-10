@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"GOproject/clip_helper"
 )
 
 // NetworkClient handles communication with the central server
@@ -99,10 +101,6 @@ func (n *NetworkClient) CreateUser(name string) (*User, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusConflict {
-		return nil, fmt.Errorf("username already exists")
-	}
-
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("server returned status: %d", resp.StatusCode)
 	}
@@ -158,6 +156,56 @@ func (n *NetworkClient) SendInvite(inviteeID, inviterID, message string) (string
 	}
 
 	return result["message"], nil
+}
+
+// UploadClipboardItem uploads a clipboard item to the server
+func (n *NetworkClient) UploadClipboardItem(item *clip_helper.ClipboardItem) (*Operation, error) {
+	jsonData, err := json.Marshal(item)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal item: %w", err)
+	}
+
+	resp, err := n.httpClient.Post(
+		n.serverURL+"/api/clipboard",
+		"application/json",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		n.setDisconnected()
+		return nil, fmt.Errorf("failed to upload clipboard item: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned status: %d", resp.StatusCode)
+	}
+
+	var op Operation
+	if err := json.NewDecoder(resp.Body).Decode(&op); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &op, nil
+}
+
+// UploadZipData uploads zip data for a specific operation
+func (n *NetworkClient) UploadZipData(opID string, zipData []byte) error {
+	resp, err := n.httpClient.Post(
+		fmt.Sprintf("%s/api/clipboard/%s/zip", n.serverURL, opID),
+		"application/zip",
+		bytes.NewBuffer(zipData),
+	)
+	if err != nil {
+		n.setDisconnected()
+		return fmt.Errorf("failed to upload zip data: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned status: %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 // setDisconnected marks the client as disconnected

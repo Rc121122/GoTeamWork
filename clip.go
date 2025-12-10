@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"time"
 
 	"GOproject/clip_helper"
@@ -63,6 +65,21 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 	// For now, use a default room or broadcast to all rooms.
 	// To fit, perhaps add to a global room or modify.
 
+	if a.Mode == "client" {
+		// Upload to server
+		op, err := a.networkClient.UploadClipboardItem(item)
+		if err != nil {
+			fmt.Printf("Failed to upload clipboard item: %v\n", err)
+			return
+		}
+
+		// If file, start async zip
+		if item.Type == clip_helper.ClipboardFile && len(item.ZipData) == 0 && len(item.Files) > 0 {
+			go a.processFileZip("global", op.ItemID, item, op.ID)
+		}
+		return
+	}
+
 	// For simplicity, since current broadcast to all, and no room context, perhaps use a special roomID like "global"
 	roomID := "global" // or get from context
 
@@ -77,10 +94,83 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 	}
 
 	// Add operation
-	a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem)
+	op := a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem)
 
 	// Broadcast sanitized clipboard snapshot to all connected users
-	a.sseManager.BroadcastToAll(EventClipboardCopied, item)
+	a.sseManager.BroadcastToAll(EventClipboardCopied, op)
+
+	// If it's a file type and ZipData is empty, start async zipping
+	if item.Type == clip_helper.ClipboardFile && len(item.ZipData) == 0 && len(item.Files) > 0 {
+		go a.processFileZip(roomID, itemID, item, "")
+	}
+}
+
+func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardItem, serverOpID string) {
+	fmt.Printf("Starting async zip for item %s with %d files\n", itemID, len(item.Files))
+	
+	// Create a temp zip file
+	tmpFile, err := os.CreateTemp("", "clipboard_files_*.zip")
+	if err != nil {
+		fmt.Printf("Failed to create temp zip file: %v\n", err)
+		return
+	}
+	defer os.Remove(tmpFile.Name()) // Clean up temp file after reading
+	defer tmpFile.Close()
+
+	if err := clip_helper.ZipFiles(item.Files, tmpFile); err != nil {
+		fmt.Printf("Failed to zip files: %v\n", err)
+		return
+	}
+
+	// Read the zip file back into memory
+	if _, err := tmpFile.Seek(0, 0); err != nil {
+		fmt.Printf("Failed to seek temp zip file: %v\n", err)
+		return
+	}
+
+	zipData, err := io.ReadAll(tmpFile)
+	if err != nil {
+		fmt.Printf("Failed to read temp zip file: %v\n", err)
+		return
+	}
+
+	// Update the item in history pool
+	a.mu.Lock()
+	// We need to find the operation and update the item
+	// This is a bit tricky since HistoryPool manages operations.
+	// Let's add a method to HistoryPool to update item data?
+	// Or just update the item pointer since we passed it?
+	// Yes, item is a pointer, so updating it here updates it in the history pool if it's the same instance.
+	item.ZipData = zipData
+	item.Text = fmt.Sprintf("%d files compressed (ready)", len(item.Files))
+	a.mu.Unlock()
+
+	fmt.Printf("Async zip completed for item %s, size: %d bytes\n", itemID, len(zipData))
+	
+	if a.Mode == "client" {
+		if serverOpID != "" {
+			if err := a.networkClient.UploadZipData(serverOpID, zipData); err != nil {
+				fmt.Printf("Failed to upload zip data: %v\n", err)
+			} else {
+				fmt.Printf("Uploaded zip data for op %s\n", serverOpID)
+			}
+		}
+		return
+	}
+
+	// Broadcast update
+	ops := a.historyPool.GetOperations(roomID, "")
+	var targetOp *Operation
+	for _, op := range ops {
+		if op.ItemID == itemID {
+			targetOp = op
+			break
+		}
+	}
+
+	if targetOp != nil {
+		a.sseManager.BroadcastToAll(EventClipboardUpdated, targetOp)
+	}
 }
 
 // StartClipboardWatcher listens for clipboard changes.

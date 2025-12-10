@@ -22,6 +22,7 @@ const (
 	EventChatMessage     SSEEventType = "chat_message"
 	EventHeartbeat       SSEEventType = "heartbeat"
 	EventClipboardCopied SSEEventType = "clipboard_copied"
+	EventClipboardUpdated SSEEventType = "clipboard_updated"
 	EventUserOffline     SSEEventType = "user_offline"
 )
 

@@ -4,6 +4,7 @@ import {
   GetAllRooms,
   GetChatHistory,
   GetMode,
+  GetOperations,
   Invite,
   JoinRoom,
   LeaveRoom,
@@ -13,7 +14,7 @@ import {
   SetUser,
 } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
-import type { AppMode, ChatMessage, Room, User } from "./types";
+import type { AppMode, ChatMessage, Room, User, Operation } from "./types";
 
 function mapUser(user: main.User): User {
   return {
@@ -97,6 +98,24 @@ export async function hostFetchChatHistory(roomId: string): Promise<ChatMessage[
   const history = await GetChatHistory(roomId);
   return history.map(mapChatMessage);
 }
+
+export async function hostFetchOperations(roomId: string, sinceId: string = ""): Promise<Operation[]> {
+  const ops = await GetOperations(roomId, sinceId);
+  // @ts-ignore
+  return ops.map(op => ({
+      id: op.id,
+      parentId: op.parentId,
+      opType: op.opType,
+      itemId: op.itemId,
+      item: op.item ? {
+          id: op.item.id,
+          type: op.item.type,
+          data: op.item.data
+      } : { id: "unknown", type: "unknown", data: {} as any },
+      timestamp: op.timestamp
+  }));
+}
+
 
 export function shareSystemClipboard(): Promise<boolean> {
   return ShareSystemClipboard();

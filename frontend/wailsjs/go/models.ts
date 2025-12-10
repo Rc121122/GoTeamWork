@@ -4,7 +4,7 @@ export namespace clip_helper {
 	    type: string;
 	    text?: string;
 	    image?: number[];
-	    zip_data?: number[];
+	    files?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ClipboardItem(source);
@@ -15,7 +15,7 @@ export namespace clip_helper {
 	        this.type = source["type"];
 	        this.text = source["text"];
 	        this.image = source["image"];
-	        this.zip_data = source["zip_data"];
+	        this.files = source["files"];
 	    }
 	}
 

@@ -12,7 +12,7 @@ import TitleBar from './components/TitleBar';
 import { SettingsModal, AboutModal } from './components/Modals';
 import { AppState } from './types/fsm';
 import { User, Room, InviteEventPayload } from './api/types';
-import { connectSSE } from './sse';
+import { connectSSE, addSSEListener, removeSSEListener } from './sse';
 import { httpAcceptInvite, httpFetchRooms } from './api/httpClient';
 import './app.css';
 
@@ -76,21 +76,33 @@ function App() {
   useEffect(() => {
     if (appMode === 'client' && currentUser) {
       console.log("Connecting to SSE for user:", currentUser.id);
-      connectSSE(currentUser.id, {
-        onUserInvited: (payload) => {
+      connectSSE(currentUser.id);
+
+      const onInvite = (payload: InviteEventPayload) => {
           console.log("Received invite:", payload);
           setPendingInvite(payload);
-        },
-        onUserJoined: (payload) => {
+      };
+
+      const onJoin = (payload: { roomId: string; roomName: string; userId: string; userName: string }) => {
           console.log("User joined room:", payload);
           if (payload.userId === currentUser.id) {
              void fetchAndJoinRoom(payload.roomId);
           }
-        },
-        onDisconnected: () => {
+      };
+
+      const onDisconnect = () => {
           console.warn("SSE Disconnected");
-        }
-      });
+      };
+
+      addSSEListener('user_invited', onInvite);
+      addSSEListener('user_joined', onJoin);
+      addSSEListener('disconnected', onDisconnect);
+
+      return () => {
+          removeSSEListener('user_invited', onInvite);
+          removeSSEListener('user_joined', onJoin);
+          removeSSEListener('disconnected', onDisconnect);
+      };
     }
   }, [appMode, currentUser, fetchAndJoinRoom]);
 

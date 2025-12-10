@@ -100,6 +100,11 @@ type ChatMessageRequest struct {
 	Message string `json:"message"`
 }
 
+type DownloadFileRequest struct {
+	OperationID string `json:"operationId"`
+	RoomID      string `json:"roomId"`
+}
+
 type LeaveRoomRequest struct {
 	UserID string `json:"userId"`
 }
