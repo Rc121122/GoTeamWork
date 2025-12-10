@@ -70,6 +70,10 @@ export function SendChatMessage(arg1, arg2, arg3) {
   return window['go']['main']['App']['SendChatMessage'](arg1, arg2, arg3);
 }
 
+export function SetUser(arg1, arg2) {
+  return window['go']['main']['App']['SetUser'](arg1, arg2);
+}
+
 export function ShareSystemClipboard() {
   return window['go']['main']['App']['ShareSystemClipboard']();
 }

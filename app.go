@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
+	"sort"
 	"sync"
 	"time"
+
+	"GOproject/clip_helper"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -154,17 +156,17 @@ func (hp *HistoryPool) GetCurrentChatMessages(roomID string) []*ChatMessage {
 }
 
 // GetCurrentClipboardItems returns current clipboard items
-func (hp *HistoryPool) GetCurrentClipboardItems(roomID string) []*ClipboardItem {
+func (hp *HistoryPool) GetCurrentClipboardItems(roomID string) []*clip_helper.ClipboardItem {
 	hp.mu.RLock()
 	defer hp.mu.RUnlock()
 
 	ops := hp.operations[roomID]
-	items := make(map[string]*ClipboardItem)
+	items := make(map[string]*clip_helper.ClipboardItem)
 
 	for _, op := range ops {
 		if op.Item != nil && op.Item.Type == ItemClipboard {
 			if op.OpType == OpAdd {
-				if item, ok := op.Item.Data.(*ClipboardItem); ok {
+				if item, ok := op.Item.Data.(*clip_helper.ClipboardItem); ok {
 					items[op.ItemID] = item
 				}
 			} else if op.OpType == OpRemove {
@@ -173,7 +175,7 @@ func (hp *HistoryPool) GetCurrentClipboardItems(roomID string) []*ClipboardItem 
 		}
 	}
 
-	result := make([]*ClipboardItem, 0, len(items))
+	result := make([]*clip_helper.ClipboardItem, 0, len(items))
 	for _, item := range items {
 		result = append(result, item)
 	}
@@ -188,6 +190,7 @@ type App struct {
 	rooms          map[string]*Room
 	currentUser    *User
 	currentRoom    *Room
+	userCounter    int
 	roomCounter    int
 	inviteCounter  int
 	historyPool    *HistoryPool
@@ -199,7 +202,7 @@ type App struct {
 	clipboardMonitorOnce  sync.Once
 	clipboardHotkeyCancel context.CancelFunc
 	pendingClipboardMu    sync.Mutex
-	pendingClipboardItem  *ClipboardItem
+	pendingClipboardItem  *clip_helper.ClipboardItem
 	pendingClipboardAt    time.Time
 }
 
@@ -276,6 +279,21 @@ func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
 }
 
+// SetUser sets the current user with a specific ID and name (used for client mode sync)
+func (a *App) SetUser(id, name string) *User {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	user := &User{
+		ID:       id,
+		Name:     name,
+		IsOnline: true,
+	}
+	a.users[id] = user
+	a.currentUser = user
+	return user
+}
+
 // ListAllUsers returns a list of all users in the system
 func (a *App) ListAllUsers() []*User {
 	a.mu.RLock()
@@ -285,6 +303,11 @@ func (a *App) ListAllUsers() []*User {
 	for _, user := range a.users {
 		users = append(users, user)
 	}
+
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].Name < users[j].Name
+	})
+
 	return users
 }
 
@@ -414,6 +437,7 @@ func (a *App) InviteWithRoom(inviteeID, inviterID, message string) (string, stri
 		"message":   cleanMessage,
 		"expiresAt": expiresAt.Unix(),
 	}
+	fmt.Printf("Sending invite %s from %s (%s) to %s (%s)\n", inviteID, inviter.Name, inviterID, invitee.Name, inviteeID)
 	if err := a.sseManager.SendToClient(inviteeID, EventUserInvited, payload); err != nil {
 		delete(a.pendingInvites, inviteID)
 		fmt.Printf("ERROR: Failed to deliver invite to %s: %v\n", inviteeID, err)
@@ -478,14 +502,14 @@ func (a *App) AcceptInvite(inviteID, inviteeID string) (string, string) {
 	delete(a.pendingInvites, inviteID)
 	a.mu.Unlock()
 
-	joinInviter := a.JoinRoom(inviter.ID, roomID)
-	if strings.HasPrefix(joinInviter, "Error") {
-		return "", joinInviter
+	_, err := a.JoinRoom(inviter.ID, roomID)
+	if err != nil {
+		return "", err.Error()
 	}
 
-	joinInvitee := a.JoinRoom(invitee.ID, roomID)
-	if strings.HasPrefix(joinInvitee, "Error") {
-		return "", joinInvitee
+	_, err = a.JoinRoom(invitee.ID, roomID)
+	if err != nil {
+		return "", err.Error()
 	}
 
 	return roomID, fmt.Sprintf("Room %s ready for collaboration", roomID)
@@ -524,11 +548,12 @@ func (a *App) CreateUser(name string) *User {
 
 	cleanName := sanitizeUserName(name)
 	if cleanName == "" {
-		cleanName = fmt.Sprintf("User %d", len(a.users)+1)
+		cleanName = fmt.Sprintf("User %d", a.userCounter+1)
 	}
 
-	// Generate user ID based on current user count
-	userID := fmt.Sprintf("user_%d", len(a.users)+1)
+	// Generate user ID based on monotonic counter
+	a.userCounter++
+	userID := fmt.Sprintf("user_%d", a.userCounter)
 	user := &User{
 		ID:       userID,
 		Name:     cleanName,
@@ -714,24 +739,24 @@ func (a *App) LeaveRoom(userID string) string {
 }
 
 // JoinRoom adds a user to a room and notifies all room members
-func (a *App) JoinRoom(userID, roomID string) string {
+func (a *App) JoinRoom(userID, roomID string) (*Room, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	user, exists := a.users[userID]
 	if !exists {
-		return "Error: User not found"
+		return nil, fmt.Errorf("user not found")
 	}
 
 	room, exists := a.rooms[roomID]
 	if !exists {
-		return "Error: Room not found"
+		return nil, fmt.Errorf("room not found")
 	}
 
 	// Check if user is already in the room
 	if contains(room.UserIDs, userID) {
 		fmt.Printf("User %s already in room %s\n", userID, roomID)
-		return fmt.Sprintf("%s is already in room %s", user.Name, room.Name)
+		return room, nil
 	}
 
 	// Add user to room
@@ -756,7 +781,7 @@ func (a *App) JoinRoom(userID, roomID string) string {
 		}
 	}
 
-	return fmt.Sprintf("%s joined room %s", user.Name, room.Name)
+	return room, nil
 }
 
 // SendChatMessage sends a chat message to a room

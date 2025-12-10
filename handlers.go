@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -276,8 +277,14 @@ func (a *App) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := a.JoinRoom(req.UserID, req.RoomID)
-	response := APIResponse{Message: result, RoomID: req.RoomID}
+	room, err := a.JoinRoom(req.UserID, req.RoomID)
+	message := ""
+	if err != nil {
+		message = err.Error()
+	} else {
+		message = fmt.Sprintf("Joined room %s", room.Name)
+	}
+	response := APIResponse{Message: message, RoomID: req.RoomID}
 	json.NewEncoder(w).Encode(response)
 }
 

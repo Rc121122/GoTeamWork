@@ -1,4 +1,26 @@
 /* Username Input Screen */
+.title-bar {
+    height: 30px;
+    width: 100%;
+    background: #2c3e50;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 15px;
+    -webkit-app-region: drag;
+    --wails-draggable: drag;
+    user-select: none;
+    cursor: default;
+    z-index: 9999;
+}
+
+.title-bar-controls {
+    display: flex;
+    gap: 15px;
+    -webkit-app-region: no-drag;
+    --wails-draggable: no-drag;
+}
+
 .username-screen {
     display: flex;
     justify-content: center;

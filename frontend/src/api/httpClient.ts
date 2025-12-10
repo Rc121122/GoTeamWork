@@ -79,6 +79,13 @@ export async function httpFetchRooms(): Promise<Room[]> {
   return request<Room[]>("/api/rooms");
 }
 
+export async function httpCreateRoom(name: string): Promise<Room> {
+  return request<Room>("/api/rooms", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
 export async function httpFetchChatHistory(roomId: string): Promise<ChatMessage[]> {
   return request<ChatMessage[]>(`/api/chat/${roomId}`);
 }

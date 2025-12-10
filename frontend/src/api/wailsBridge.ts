@@ -5,10 +5,12 @@ import {
   GetChatHistory,
   GetMode,
   Invite,
+  JoinRoom,
   LeaveRoom,
   ListAllUsers,
   SendChatMessage,
   ShareSystemClipboard,
+  SetUser,
 } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
 import type { AppMode, ChatMessage, Room, User } from "./types";
@@ -64,6 +66,11 @@ export async function hostCreateUser(name: string): Promise<User> {
   return mapUser(user);
 }
 
+export async function hostSetUser(id: string, name: string): Promise<User> {
+  const user = await SetUser(id, name);
+  return mapUser(user);
+}
+
 export async function hostCreateRoom(name: string): Promise<Room> {
   const room = await CreateRoom(name);
   return mapRoom(room);
@@ -71,6 +78,11 @@ export async function hostCreateRoom(name: string): Promise<Room> {
 
 export async function hostInviteUser(userId: string): Promise<string> {
   return Invite(userId);
+}
+
+export async function hostJoinRoom(roomId: string, userId: string): Promise<Room> {
+  const room = await JoinRoom(roomId, userId);
+  return mapRoom(room);
 }
 
 export async function hostLeaveRoom(userId: string): Promise<string> {

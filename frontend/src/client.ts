@@ -74,6 +74,9 @@ function renderUsernameInput(): void {
         onUserCreated: () => {
           void updateUserList();
         },
+        onUserOffline: () => {
+          void updateUserList();
+        },
         onUserInvited: handleInvite,
         onUserJoined: handleUserJoined,
         onChatMessage: renderRoomChatMessage,

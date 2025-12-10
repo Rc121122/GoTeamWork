@@ -4,7 +4,6 @@ go 1.24
 
 require (
 	github.com/go-vgo/robotgo v0.110.8
-	github.com/robotn/gohook v0.42.2
 	github.com/wailsapp/wails/v2 v2.10.2
 	golang.design/x/clipboard v0.7.1
 )

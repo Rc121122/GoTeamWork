@@ -22,6 +22,7 @@ const (
 	EventChatMessage     SSEEventType = "chat_message"
 	EventHeartbeat       SSEEventType = "heartbeat"
 	EventClipboardCopied SSEEventType = "clipboard_copied"
+	EventUserOffline     SSEEventType = "user_offline"
 )
 
 // SSEEvent represents a server-sent event
@@ -66,11 +67,14 @@ func (sm *SSEManager) AddClient(userID string, w http.ResponseWriter, flusher ht
 	return client
 }
 
-// RemoveClient removes an SSE client
-func (sm *SSEManager) RemoveClient(userID string) {
+// RemoveClient removes an SSE client if it matches the provided client instance
+func (sm *SSEManager) RemoveClient(client *SSEClient) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	delete(sm.clients, userID)
+	
+	if current, ok := sm.clients[client.UserID]; ok && current == client {
+		delete(sm.clients, client.UserID)
+	}
 }
 
 // SendToClient sends an event to a specific client
@@ -81,7 +85,7 @@ func (sm *SSEManager) SendToClient(userID string, eventType SSEEventType, data i
 	}
 
 	if err := client.sendEvent(eventType, data); err != nil {
-		sm.RemoveClient(userID)
+		sm.RemoveClient(client)
 		return fmt.Errorf("failed to send event to client %s: %w", userID, err)
 	}
 
@@ -94,7 +98,7 @@ func (sm *SSEManager) BroadcastToAll(eventType SSEEventType, data interface{}) {
 	for _, client := range clients {
 		if err := client.sendEvent(eventType, data); err != nil {
 			fmt.Printf("BroadcastToAll: dropping client %s due to send error: %v\n", client.UserID, err)
-			sm.RemoveClient(client.UserID)
+			sm.RemoveClient(client)
 		}
 	}
 }
@@ -119,9 +123,17 @@ func (sm *SSEManager) BroadcastToUsers(userIDs []string, eventType SSEEventType,
 	for _, client := range clients {
 		if err := client.sendEvent(eventType, data); err != nil {
 			fmt.Printf("BroadcastToUsers: dropping client %s due to send error: %v\n", client.UserID, err)
-			sm.RemoveClient(client.UserID)
+			sm.RemoveClient(client)
 		}
 	}
+}
+
+// IsConnected checks if a user has an active SSE connection
+func (sm *SSEManager) IsConnected(userID string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	_, exists := sm.clients[userID]
+	return exists
 }
 
 // SendHeartbeat sends a heartbeat event if the client is connected
@@ -205,7 +217,7 @@ func (a *App) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add client to SSE manager
-	a.sseManager.AddClient(userID, w, flusher)
+	client := a.sseManager.AddClient(userID, w, flusher)
 	fmt.Printf("SSE connected for user: %s\n", userID)
 
 	// Send initial connection event
@@ -215,8 +227,32 @@ func (a *App) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 	// Handle connection cleanup
 	defer func() {
-		a.sseManager.RemoveClient(userID)
+		a.sseManager.RemoveClient(client)
 		fmt.Printf("SSE disconnected for user: %s\n", userID)
+
+		// Check if user has reconnected (has a valid client in SSE manager)
+		if a.sseManager.IsConnected(userID) {
+			fmt.Printf("User %s reconnected, skipping cleanup\n", userID)
+			return
+		}
+
+		// Handle user cleanup
+		a.mu.Lock()
+		user, exists := a.users[userID]
+		a.mu.Unlock()
+
+		if exists {
+			if user.RoomID != nil {
+				a.LeaveRoom(userID)
+			}
+
+			a.mu.Lock()
+			delete(a.users, userID)
+			a.mu.Unlock()
+
+			// Notify others to update their user list
+			a.sseManager.BroadcastToAll(EventUserOffline, map[string]string{"userId": userID})
+		}
 	}()
 
 	ticker := time.NewTicker(30 * time.Second)
