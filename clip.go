@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"time"
 
 	"GOproject/clip_helper"
@@ -121,7 +122,7 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 
 func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardItem, serverOpID string) {
 	fmt.Printf("Starting async zip for item %s with %d files\n", itemID, len(item.Files))
-	
+
 	// Create a temp zip file
 	tmpFile, err := os.CreateTemp("", "clipboard_files_*.zip")
 	if err != nil {
@@ -150,29 +151,24 @@ func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardI
 
 	// Update the item in history pool
 	a.mu.Lock()
-	// We need to find the operation and update the item
-	// This is a bit tricky since HistoryPool manages operations.
-	// Let's add a method to HistoryPool to update item data?
-	// Or just update the item pointer since we passed it?
-	// Yes, item is a pointer, so updating it here updates it in the history pool if it's the same instance.
 	item.ZipData = zipData
 	item.Text = fmt.Sprintf("%d files compressed (ready)", len(item.Files))
 	a.mu.Unlock()
 
 	fmt.Printf("Async zip completed for item %s, size: %d bytes\n", itemID, len(zipData))
-	
+
 	if a.Mode == "client" {
 		if serverOpID != "" {
 			if err := a.networkClient.UploadZipData(serverOpID, zipData); err != nil {
 				fmt.Printf("Failed to upload zip data: %v\n", err)
-			} else {
-				fmt.Printf("Uploaded zip data for op %s\n", serverOpID)
+				return
 			}
+			fmt.Printf("Uploaded zip data for op %s\n", serverOpID)
 		}
 		return
 	}
 
-	// Broadcast update
+	// Broadcast update - important: send updated operation with ZIP data
 	ops := a.historyPool.GetOperations(roomID, "")
 	var targetOp *Operation
 	for _, op := range ops {
@@ -193,8 +189,11 @@ func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardI
 		a.mu.RUnlock()
 
 		if roomExists {
+			fmt.Printf("Broadcasting clipboard update for item %s with ZIP data\n", itemID)
 			a.sseManager.BroadcastToUsers(members, EventClipboardUpdated, targetOp, "")
 		}
+	} else {
+		fmt.Printf("Warning: Could not find operation for item %s to broadcast update\n", itemID)
 	}
 }
 
@@ -231,7 +230,56 @@ func StartClipboardWatcher(ctx context.Context, cb func(*clip_helper.ClipboardIt
 		}
 	}()
 
+	// On Windows, also poll for file changes since CF_HDROP is not watched by clipboard.Watch
+	if runtime.GOOS == "windows" {
+		go startWindowsFilePoller(ctx, cb)
+	}
+
 	return nil
+}
+
+// startWindowsFilePoller polls the clipboard for file changes on Windows
+func startWindowsFilePoller(ctx context.Context, cb func(*clip_helper.ClipboardItem, int, int)) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastFilePaths map[string]bool = make(map[string]bool)
+	var lastDetectionTime time.Time
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			item, err := clip_helper.ReadClipboard()
+			if err != nil {
+				continue
+			}
+
+			// Only interested in file changes
+			if item.Type != clip_helper.ClipboardFile || len(item.Files) == 0 {
+				continue
+			}
+
+			// Check if we have new files
+			hasNewFiles := false
+			for _, path := range item.Files {
+				if !lastFilePaths[path] {
+					hasNewFiles = true
+					lastFilePaths[path] = true
+				}
+			}
+
+			// Only notify if we have new files AND enough time has passed since last detection
+			// This prevents multiple notifications for the same file set
+			now := time.Now()
+			if hasNewFiles && now.Sub(lastDetectionTime) > 1*time.Second {
+				lastDetectionTime = now
+				x, y := getMousePosition()
+				cb(item, x, y)
+			}
+		}
+	}
 }
 
 func handleClipboardChange(cb func(*clip_helper.ClipboardItem, int, int)) {
@@ -324,4 +372,3 @@ func (a *App) ShareSystemClipboard() (bool, error) {
 func (a *App) GetClipboardItem() (*clip_helper.ClipboardItem, error) {
 	return clip_helper.ReadClipboard()
 }
-
