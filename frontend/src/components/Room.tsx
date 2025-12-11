@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { hostSendChatMessage, hostFetchChatHistory, hostLeaveRoom, hostFetchOperations } from '../api/wailsBridge';
-import { httpSendChatMessage, httpFetchChatHistory, httpLeaveRoom, httpFetchOperations } from '../api/httpClient';
+import { httpSendChatMessage, httpFetchChatHistory, httpLeaveRoom, httpFetchOperations, getApiBaseUrl } from '../api/httpClient';
 import { ChatMessage, Room, Operation, CopiedItem } from '../api/types';
 import { addSSEListener, removeSSEListener } from '../sse';
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime';
@@ -199,7 +199,7 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
                                   href="#"
                                   onClick={(e) => {
                                       e.preventDefault();
-                                      BrowserOpenURL(`http://localhost:8080/api/download/${op.id}`);
+                                      BrowserOpenURL(`${getApiBaseUrl()}/api/download/${op.id}`);
                                   }}
                                   style={{
                                       display: 'inline-block',
@@ -227,44 +227,49 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
-      {/* Left Column: Chat */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid #444', padding: '10px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <h3>Chat: {currentRoom.name}</h3>
-            <button onClick={handleLeave} style={{background: '#e74c3c', color: 'white', border: 'none', padding: '5px 10px', cursor: 'pointer'}}>Leave Room</button>
+    <div className="room-shell">
+      {/* Chat */}
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <p className="pill" style={{ display: 'inline-block', marginBottom: '4px' }}>Chat</p>
+            <h3 style={{ margin: 0 }}>{currentRoom.name}</h3>
+          </div>
+          <button className="secondary-btn" onClick={handleLeave}>Leave Room</button>
         </div>
-        
-        <div style={{ flex: 1, overflowY: 'auto', marginBottom: '10px', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '5px' }}>
+        <div className="chat-list">
           {messages.map(msg => (
-            <div key={msg.id} style={{ marginBottom: '5px' }}>
+            <div key={msg.id} className="chat-bubble">
               <strong>{msg.userId === currentUser.id ? 'Me' : msg.userName}:</strong> {msg.message}
             </div>
           ))}
           <div ref={chatEndRef} />
         </div>
-        <form onSubmit={handleSend} style={{ display: 'flex' }}>
+        <form onSubmit={handleSend} className="chat-input">
           <input 
             value={newMessage} 
-            onChange={e => setNewMessage(e.target.value)} 
-            style={{ flex: 1, padding: '10px' }}
+            onChange={e => setNewMessage(e.target.value)}
+            className="text-input"
             placeholder="Type a message..."
           />
-          <button type="submit" style={{ padding: '10px' }}>Send</button>
+          <button type="submit" className="primary-btn">Send</button>
         </form>
-        <div style={{ marginTop: '10px', padding: '5px', borderTop: '1px solid #444', fontSize: '0.9rem', color: '#aaa' }}>
+        <div className="muted" style={{ fontSize: '0.9rem' }}>
             Logged in as: <strong>{currentUser.name}</strong>
         </div>
       </div>
 
-      {/* Right Column: Shared Clipboard */}
-      <div style={{ flex: 1, padding: '10px', background: '#2c3e50', overflowY: 'auto' }}>
-        <h3>Shared Clipboard</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      {/* Clipboard */}
+      <div className="panel">
+        <div className="panel-header">
+          <div>
+            <p className="pill" style={{ display: 'inline-block', marginBottom: '4px' }}>Clipboard</p>
+            <h3 style={{ margin: 0 }}>Shared Items</h3>
+          </div>
+        </div>
+        <div className="clipboard-list">
           {operations.length === 0 ? (
-             <div style={{ background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '5px' }}>
-                <p>No shared items yet.</p>
-             </div>
+             <div className="muted">No shared items yet.</div>
           ) : (
               operations.slice().reverse().map(renderClipboardItem)
           )}

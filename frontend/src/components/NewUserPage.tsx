@@ -42,28 +42,46 @@ const NewUserPage: React.FC<NewUserPageProps> = ({ onUserCreated, appMode }) => 
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-      <h2>Create New User</h2>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '300px' }}>
-        {appMode === 'client' && (
-          <input 
-            type="text" 
-            placeholder="Server IP (default: localhost)" 
-            value={serverIp} 
-            onChange={(e) => setServerIp(e.target.value)}
-            style={{ padding: '10px', fontSize: '1rem' }}
-          />
-        )}
-        <input 
-          type="text" 
-          placeholder="Enter Username" 
-          value={username} 
-          onChange={(e) => setUsername(e.target.value)}
-          style={{ padding: '10px', fontSize: '1rem' }}
-        />
-        <button type="submit" style={{ padding: '10px', fontSize: '1rem' }}>Create</button>
-      </form>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+    <div className="hero-shell">
+      <div className="hero-card">
+        <div className="hero-left">
+          <p className="pill" style={{ display: 'inline-block' }}>Profile</p>
+          <h1 style={{ marginBottom: '8px' }}>Create your profile</h1>
+          <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>
+            Choose a username and connect to your host server.
+          </p>
+          <div className="card-section">
+            <form onSubmit={handleSubmit} className="username-input-group" style={{ margin: 0 }}>
+              {appMode === 'client' && (
+                <input
+                  type="text"
+                  placeholder="Server IP (default: localhost)"
+                  value={serverIp}
+                  onChange={(e) => setServerIp(e.target.value)}
+                  className="text-input"
+                />
+              )}
+              <input
+                type="text"
+                placeholder="Enter Username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="text-input"
+              />
+              <button type="submit" className="primary-btn">Create</button>
+            </form>
+            {error && <p className="error-message" style={{ display: 'block' }}>{error}</p>}
+          </div>
+        </div>
+        <div className="card-section">
+          <h3 style={{ marginTop: 0 }}>Tips</h3>
+          <ul style={{ margin: '12px 0 0 16px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            <li>Use your host machine IP for client connections.</li>
+            <li>Usernames must be unique; conflicts return 409.</li>
+            <li>After creation, you will enter the lobby to join or create rooms.</li>
+          </ul>
+        </div>
+      </div>
     </div>
   );
 };

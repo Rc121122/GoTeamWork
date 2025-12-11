@@ -118,45 +118,61 @@ const Lobby: React.FC<LobbyProps> = ({ currentUser, onJoinRoom, appMode, onInvit
   };
 
   return (
-    <div style={{ padding: '20px', height: '100%', overflowY: 'auto' }}>
-      <h2>Lobby - Welcome, {currentUser.name}</h2>
-      
-      <div style={{ display: 'flex', gap: '20px' }}>
-        <div style={{ flex: 1 }}>
-          <h3>Online Users</h3>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {users.map(u => (
-              <li key={u.id} style={{ padding: '5px', borderBottom: '1px solid #444', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>{u.name} {u.id === currentUser.id ? '(You)' : ''} {u.roomId ? '(In Room)' : ''}</span>
-                {u.id !== currentUser.id && !u.roomId && (
-                    <button onClick={() => handleInvite(u.id)} style={{ marginLeft: '10px', padding: '2px 5px', cursor: 'pointer' }}>Invite</button>
-                )}
-              </li>
-            ))}
-          </ul>
+    <div className="lobby-shell">
+      <div className="section-header">
+        <div>
+          <p className="pill" style={{ display: 'inline-block', marginBottom: '6px' }}>Lobby</p>
+          <h2 style={{ margin: 0 }}>Welcome, {currentUser.name}</h2>
         </div>
+        <div className="pill-soft">Users online: {users.length}</div>
+      </div>
 
-        <div style={{ flex: 1 }}>
-          <h3>Rooms</h3>
-          <div style={{ marginBottom: '10px' }}>
+      <div className="section-card">
+        <div className="section-header">
+          <h3 style={{ margin: 0 }}>Rooms</h3>
+          <div className="input-inline">
             <input 
               value={newRoomName} 
               onChange={e => setNewRoomName(e.target.value)} 
               placeholder="New Room Name"
-              style={{ padding: '5px' }}
+              className="text-input"
             />
-            <button onClick={handleCreateRoom} style={{ marginLeft: '5px', padding: '5px' }}>Create</button>
+            <button onClick={handleCreateRoom} className="primary-btn">Create</button>
           </div>
-                    <ul style={{ listStyle: 'none', padding: 0 }}>
-            {rooms.map(r => (
-              <li key={r.id} style={{ padding: '5px', borderBottom: '1px solid #444', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>{r.name} ({r.userIds.length} users)</span>
-                <button onClick={() => handleJoinRoom(r)} style={{ marginLeft: '10px', padding: '2px 5px', cursor: 'pointer' }}>
-                    {r.ownerId === currentUser.id || r.userIds.includes(currentUser.id) ? 'Join' : 'Request to Join'}
-                </button>
-              </li>
-            ))}
-          </ul>
+        </div>
+        <div className="list-grid">
+          {rooms.map(r => (
+            <div key={r.id} className="list-item">
+              <div>
+                <div style={{ fontWeight: 700 }}>{r.name}</div>
+                <div className="muted">{r.userIds.length} users</div>
+              </div>
+              <button className="secondary-btn" onClick={() => handleJoinRoom(r)}>
+                {r.ownerId === currentUser.id || r.userIds.includes(currentUser.id) ? 'Join' : 'Request to Join'}
+              </button>
+            </div>
+          ))}
+          {rooms.length === 0 && <div className="muted">No rooms yet. Create one to start collaborating.</div>}
+        </div>
+      </div>
+
+      <div className="section-card">
+        <div className="section-header">
+          <h3 style={{ margin: 0 }}>Online Users</h3>
+        </div>
+        <div className="list-grid">
+          {users.map(u => (
+            <div key={u.id} className="list-item">
+              <div>
+                <div style={{ fontWeight: 700 }}>{u.name} {u.id === currentUser.id ? '(You)' : ''}</div>
+                <div className="muted">{u.roomId ? 'In Room' : 'Available'}</div>
+              </div>
+              {u.id !== currentUser.id && !u.roomId && (
+                <button className="secondary-btn" onClick={() => handleInvite(u.id)}>Invite</button>
+              )}
+            </div>
+          ))}
+          {users.length === 0 && <div className="muted">No users online.</div>}
         </div>
       </div>
     </div>

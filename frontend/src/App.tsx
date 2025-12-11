@@ -240,16 +240,16 @@ function App() {
   }
 
   return (
-    <div className="app-container" style={{display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: 'rgba(27, 38, 54, 1)', color: 'white'}}>
+    <div className="app-container">
       <TitleBar />
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div className="content">
         <Sidebar 
             onReboot={handleReboot}
             onSettings={() => setShowSettings(true)}
             onAbout={() => setShowAbout(true)}
         />
         
-        <main className="content" style={{flex: 1, padding: '0', overflow: 'hidden'}}>
+        <main className="main-area">
             {state === 'LANDING' && <LandingPage onStart={handleStart} />}
             {state === 'NEW_USER' && <NewUserPage onUserCreated={handleUserCreated} appMode={appMode} />}
             {state === 'LOBBY' && currentUser && <Lobby currentUser={currentUser} onJoinRoom={handleJoinRoom} appMode={appMode} onInviteSent={handleInviteSent} />}
