@@ -294,6 +294,76 @@ func (a *App) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// handleJoinRequest handles POST /api/join/request
+func (a *App) handleJoinRequest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req JoinRoomRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	msg, err := a.RequestJoinRoom(req.UserID, req.RoomID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := APIResponse{Message: msg}
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleApproveJoin handles POST /api/join/approve
+func (a *App) handleApproveJoin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == "OPTIONS" {
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type ApproveRequest struct {
+		OwnerID     string `json:"ownerId"`
+		RequesterID string `json:"requesterId"`
+		RoomID      string `json:"roomId"`
+	}
+
+	var req ApproveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	err := a.ApproveJoinRequest(req.OwnerID, req.RequesterID, req.RoomID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	response := APIResponse{Message: "Approved"}
+	json.NewEncoder(w).Encode(response)
+}
+
 // handleLeave handles POST /api/leave
 func (a *App) handleLeave(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -381,13 +451,25 @@ func (a *App) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find the operation in global room (since clipboard is global for now)
-	// In a real app, we should probably pass roomID or search all rooms
-	ops := a.GetOperations("global", "")
+	// Find the operation in any room
 	var targetOp *Operation
-	for _, op := range ops {
-		if op.ID == opID {
-			targetOp = op
+	
+	a.mu.RLock()
+	roomIDs := make([]string, 0, len(a.rooms))
+	for id := range a.rooms {
+		roomIDs = append(roomIDs, id)
+	}
+	a.mu.RUnlock()
+	
+	for _, rid := range roomIDs {
+		ops := a.GetOperations(rid, "")
+		for _, op := range ops {
+			if op.ID == opID {
+				targetOp = op
+				break
+			}
+		}
+		if targetOp != nil {
 			break
 		}
 	}
@@ -438,7 +520,21 @@ func (a *App) handleClipboardUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Add to history pool
-	roomID := "global"
+	a.mu.RLock()
+	user, exists := a.users[req.UserID]
+	a.mu.RUnlock()
+
+	if !exists {
+		http.Error(w, "User not found", http.StatusForbidden)
+		return
+	}
+
+	if user.RoomID == nil {
+		http.Error(w, "User not in a room", http.StatusForbidden)
+		return
+	}
+	roomID := *user.RoomID
+
 	itemID := fmt.Sprintf("clip_%d", time.Now().UnixNano())
 	histItem := &Item{
 		ID:   itemID,
@@ -446,10 +542,22 @@ func (a *App) handleClipboardUpload(w http.ResponseWriter, r *http.Request) {
 		Data: &req.Item,
 	}
 
-	fmt.Printf("Received clipboard upload from %s: %d files\n", req.UserName, len(req.Item.Files))
+	fmt.Printf("Received clipboard upload from %s in room %s: %d files\n", req.UserName, roomID, len(req.Item.Files))
 
 	op := a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem, req.UserID, req.UserName)
-	a.sseManager.BroadcastToAll(EventClipboardCopied, op)
+	
+	// Get room members for broadcast
+	a.mu.RLock()
+	room, roomExists := a.rooms[roomID]
+	var members []string
+	if roomExists {
+		members = append(members, room.UserIDs...)
+	}
+	a.mu.RUnlock()
+
+	if roomExists {
+		a.sseManager.BroadcastToUsers(members, EventClipboardCopied, op, "")
+	}
 
 	json.NewEncoder(w).Encode(op)
 }
@@ -496,11 +604,27 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Zip data size: %d bytes\n", len(zipData))
 
 	// Update item in history pool
-	ops := a.GetOperations("global", "")
+	// Find operation in any room
 	var targetOp *Operation
-	for _, op := range ops {
-		if op.ID == opID {
-			targetOp = op
+	var roomID string
+	
+	a.mu.RLock()
+	roomIDs := make([]string, 0, len(a.rooms))
+	for id := range a.rooms {
+		roomIDs = append(roomIDs, id)
+	}
+	a.mu.RUnlock()
+	
+	for _, rid := range roomIDs {
+		ops := a.GetOperations(rid, "")
+		for _, op := range ops {
+			if op.ID == opID {
+				targetOp = op
+				roomID = rid
+				break
+			}
+		}
+		if targetOp != nil {
 			break
 		}
 	}
@@ -529,6 +653,20 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("Updated operation %s with zip data. Text: %s\n", opID, itemData.Text)
 
-	a.sseManager.BroadcastToAll(EventClipboardUpdated, targetOp)
+	// Broadcast to room members
+	if roomID != "" {
+		a.mu.RLock()
+		room, roomExists := a.rooms[roomID]
+		var members []string
+		if roomExists {
+			members = append(members, room.UserIDs...)
+		}
+		a.mu.RUnlock()
+		
+		if roomExists {
+			a.sseManager.BroadcastToUsers(members, EventClipboardUpdated, targetOp, "")
+		}
+	}
+	
 	w.WriteHeader(http.StatusOK)
 }

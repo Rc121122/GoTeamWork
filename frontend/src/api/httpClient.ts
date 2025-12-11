@@ -69,6 +69,20 @@ export async function httpJoinRoom(payload: JoinRoomRequest): Promise<ApiMessage
   });
 }
 
+export async function httpRequestJoin(payload: JoinRoomRequest): Promise<ApiMessageResponse> {
+  return request<ApiMessageResponse>("/api/join/request", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function httpApproveJoin(ownerId: string, requesterId: string, roomId: string): Promise<ApiMessageResponse> {
+  return request<ApiMessageResponse>("/api/join/approve", {
+    method: "POST",
+    body: JSON.stringify({ ownerId, requesterId, roomId }),
+  });
+}
+
 export async function httpLeaveRoom(payload: LeaveRoomRequest): Promise<ApiMessageResponse> {
   return request<ApiMessageResponse>("/api/leave", {
     method: "POST",

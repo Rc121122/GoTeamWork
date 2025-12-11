@@ -108,7 +108,9 @@ export namespace main {
 	export class Room {
 	    id: string;
 	    name: string;
+	    ownerId: string;
 	    userIds: string[];
+	    approvedUserIds: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Room(source);
@@ -118,7 +120,9 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.name = source["name"];
+	        this.ownerId = source["ownerId"];
 	        this.userIds = source["userIds"];
+	        this.approvedUserIds = source["approvedUserIds"];
 	    }
 	}
 	export class User {

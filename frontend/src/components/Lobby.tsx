@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { hostListUsers, hostListRooms, hostCreateRoom, hostJoinRoom, hostInviteUser } from '../api/wailsBridge';
-import { httpFetchUsers, httpFetchRooms, httpCreateRoom, httpJoinRoom, httpInviteUser } from '../api/httpClient';
+import { hostListUsers, hostListRooms, hostCreateRoom, hostJoinRoom, hostInviteUser, hostRequestJoin } from '../api/wailsBridge';
+import { httpFetchUsers, httpFetchRooms, httpCreateRoom, httpJoinRoom, httpInviteUser, httpRequestJoin } from '../api/httpClient';
 import { User, Room } from '../api/types';
 
 interface LobbyProps {
@@ -49,39 +49,40 @@ const Lobby: React.FC<LobbyProps> = ({ currentUser, onJoinRoom, appMode, onInvit
       }
       setNewRoomName('');
       refreshData();
-      // Optionally auto-join
-      await handleJoinRoom(room.id);
+      // Auto-join created room (owner joins directly)
+      onJoinRoom(room);
     } catch (err) {
       console.error(err);
     }
   };
 
-  const handleJoinRoom = async (roomId: string) => {
-      try {
-          let room: Room;
-          if (appMode === 'client') {
-             // httpJoinRoom returns ApiMessageResponse, not Room. We need to fetch room details or assume success.
-             // But wait, httpJoinRoom returns ApiMessageResponse.
-             // And onJoinRoom expects a Room object.
-             // We should probably fetch the room details after joining.
-             await httpJoinRoom({ roomId, userId: currentUser.id });
-             // Fetch updated room list to get the room object? Or find it in 'rooms' state.
-             const foundRoom = rooms.find(r => r.id === roomId);
-             if (foundRoom) {
-                 room = foundRoom;
-             } else {
-                 // Fallback: fetch rooms again
-                 const r = await httpFetchRooms();
-                 const freshRoom = r.find(rm => rm.id === roomId);
-                 if (!freshRoom) throw new Error("Room not found after joining");
-                 room = freshRoom;
-             }
-          } else {
-             room = await hostJoinRoom(roomId, currentUser.id);
+  const handleJoinRoom = async (room: Room) => {
+      // If user is owner or already in room, join directly
+      if (room.ownerId === currentUser.id || room.userIds.includes(currentUser.id)) {
+          try {
+              if (appMode === 'client') {
+                 await httpJoinRoom({ roomId: room.id, userId: currentUser.id });
+              } else {
+                 await hostJoinRoom(room.id, currentUser.id);
+              }
+              onJoinRoom(room);
+          } catch (err) {
+              console.error("Failed to join room", err);
           }
-          onJoinRoom(room);
+          return;
+      }
+
+      // Otherwise, request to join
+      try {
+          if (appMode === 'client') {
+              await httpRequestJoin({ roomId: room.id, userId: currentUser.id });
+          } else {
+              await hostRequestJoin(currentUser.id, room.id);
+          }
+          alert("Join request sent to room owner. Please wait for approval.");
       } catch (err) {
-          console.error("Failed to join room", err);
+          console.error("Failed to request join", err);
+          alert("Failed to send join request");
       }
   }
 
@@ -126,8 +127,8 @@ const Lobby: React.FC<LobbyProps> = ({ currentUser, onJoinRoom, appMode, onInvit
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {users.map(u => (
               <li key={u.id} style={{ padding: '5px', borderBottom: '1px solid #444', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>{u.name} {u.id === currentUser.id ? '(You)' : ''}</span>
-                {u.id !== currentUser.id && (
+                <span>{u.name} {u.id === currentUser.id ? '(You)' : ''} {u.roomId ? '(In Room)' : ''}</span>
+                {u.id !== currentUser.id && !u.roomId && (
                     <button onClick={() => handleInvite(u.id)} style={{ marginLeft: '10px', padding: '2px 5px', cursor: 'pointer' }}>Invite</button>
                 )}
               </li>
@@ -146,11 +147,13 @@ const Lobby: React.FC<LobbyProps> = ({ currentUser, onJoinRoom, appMode, onInvit
             />
             <button onClick={handleCreateRoom} style={{ marginLeft: '5px', padding: '5px' }}>Create</button>
           </div>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
+                    <ul style={{ listStyle: 'none', padding: 0 }}>
             {rooms.map(r => (
-              <li key={r.id} style={{ padding: '10px', border: '1px solid #444', marginBottom: '5px', display: 'flex', justifyContent: 'space-between' }}>
+              <li key={r.id} style={{ padding: '5px', borderBottom: '1px solid #444', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>{r.name} ({r.userIds.length} users)</span>
-                <button onClick={() => handleJoinRoom(r.id)}>Join</button>
+                <button onClick={() => handleJoinRoom(r)} style={{ marginLeft: '10px', padding: '2px 5px', cursor: 'pointer' }}>
+                    {r.ownerId === currentUser.id || r.userIds.includes(currentUser.id) ? 'Join' : 'Request to Join'}
+                </button>
               </li>
             ))}
           </ul>

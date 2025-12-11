@@ -17,9 +17,11 @@ type User struct {
 
 // Room represents a collaboration room
 type Room struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	UserIDs []string `json:"userIds"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	OwnerID         string   `json:"ownerId"`
+	UserIDs         []string `json:"userIds"`
+	ApprovedUserIDs []string `json:"approvedUserIds"` // Users allowed to join
 }
 
 // ChatMessage represents a chat message

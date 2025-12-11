@@ -337,6 +337,7 @@ func (a *App) Invite(userID string) string {
 		a.currentRoom = &Room{
 			ID:      roomID,
 			Name:    fmt.Sprintf("Room %d", a.roomCounter),
+			OwnerID: "host", // Host is the owner
 			UserIDs: []string{},
 		}
 		a.rooms[roomID] = a.currentRoom
@@ -378,6 +379,7 @@ func (a *App) CreateRoom(name string) *Room {
 	room := &Room{
 		ID:      roomID,
 		Name:    cleanName,
+		OwnerID: "host", // Default to host for now, or we need to pass creator ID
 		UserIDs: []string{},
 	}
 	a.rooms[roomID] = room
@@ -496,9 +498,11 @@ func (a *App) AcceptInvite(inviteID, inviteeID string) (string, string) {
 	a.roomCounter++
 	roomID := fmt.Sprintf("room_%d", a.roomCounter)
 	room := &Room{
-		ID:      roomID,
-		Name:    fmt.Sprintf("Room %d", a.roomCounter),
-		UserIDs: []string{},
+		ID:              roomID,
+		Name:            fmt.Sprintf("Room %d", a.roomCounter),
+		OwnerID:         inviter.ID, // Inviter becomes the owner
+		UserIDs:         []string{},
+		ApprovedUserIDs: []string{inviter.ID, invitee.ID},
 	}
 	a.rooms[roomID] = room
 	delete(a.pendingInvites, inviteID)
@@ -551,6 +555,24 @@ func (a *App) CreateUser(name string) *User {
 	cleanName := sanitizeUserName(name)
 	if cleanName == "" {
 		cleanName = fmt.Sprintf("User %d", a.userCounter+1)
+	}
+
+	// Check for name conflict and resolve it
+	originalName := cleanName
+	counter := 1
+	for {
+		conflict := false
+		for _, u := range a.users {
+			if u.Name == cleanName {
+				conflict = true
+				break
+			}
+		}
+		if !conflict {
+			break
+		}
+		cleanName = fmt.Sprintf("%s (%d)", originalName, counter)
+		counter++
 	}
 
 	// Generate user ID based on monotonic counter
@@ -705,11 +727,18 @@ func (a *App) LeaveRoom(userID string) string {
 	user.RoomID = nil
 	remainingMembers := append([]string{}, room.UserIDs...)
 
+	// If the leaver was the owner, assign a new owner
+	if room.OwnerID == user.ID && len(remainingMembers) > 0 {
+		room.OwnerID = remainingMembers[0]
+		fmt.Printf("Room %s owner changed to %s\n", room.ID, room.OwnerID)
+	}
+
 	leavePayload := map[string]interface{}{
 		"roomId":   room.ID,
 		"roomName": room.Name,
 		"userId":   user.ID,
 		"userName": user.Name,
+		"ownerId":  room.OwnerID,
 	}
 	a.sseManager.BroadcastToUsers(remainingMembers, EventUserLeft, leavePayload, "")
 
@@ -753,6 +782,24 @@ func (a *App) JoinRoom(userID, roomID string) (*Room, error) {
 	room, exists := a.rooms[roomID]
 	if !exists {
 		return nil, fmt.Errorf("room not found")
+	}
+
+	// Check permissions for non-host rooms
+	if room.OwnerID != "" && room.OwnerID != "host" {
+		isApproved := false
+		if room.OwnerID == userID {
+			isApproved = true
+		} else {
+			for _, id := range room.ApprovedUserIDs {
+				if id == userID {
+					isApproved = true
+					break
+				}
+			}
+		}
+		if !isApproved {
+			return nil, fmt.Errorf("permission denied: join request required")
+		}
 	}
 
 	// Check if user is already in the room
@@ -890,6 +937,8 @@ func (a *App) StartHTTPServer(port string) {
 	http.HandleFunc("/api/chat", a.handleChat)
 	http.HandleFunc("/api/chat/", a.handleChat)
 	http.HandleFunc("/api/operations/", a.handleOperations)
+	http.HandleFunc("/api/join/request", a.handleJoinRequest)
+	http.HandleFunc("/api/join/approve", a.handleApproveJoin)
 	http.HandleFunc("/api/download/", a.handleDownload)
 	http.HandleFunc("/api/clipboard", a.handleClipboardUpload)
 	http.HandleFunc("/api/clipboard/", a.handleZipUpload)
@@ -898,4 +947,63 @@ func (a *App) StartHTTPServer(port string) {
 
 	fmt.Printf("Starting HTTP server on port %s\n", port)
 	go http.ListenAndServe(":"+port, nil)
+}
+
+// RequestJoinRoom handles a user requesting to join a room
+func (a *App) RequestJoinRoom(userID, roomID string) (string, error) {
+	a.mu.RLock()
+	user, userExists := a.users[userID]
+	room, roomExists := a.rooms[roomID]
+	a.mu.RUnlock()
+
+	if !userExists {
+		return "", fmt.Errorf("user not found")
+	}
+	if !roomExists {
+		return "", fmt.Errorf("room not found")
+	}
+
+	// If user is already in the room, just return success
+	if contains(room.UserIDs, userID) {
+		return "Already in room", nil
+	}
+
+	// Notify owner
+	payload := map[string]interface{}{
+		"roomId":        room.ID,
+		"roomName":      room.Name,
+		"requesterId":   user.ID,
+		"requesterName": user.Name,
+	}
+
+	fmt.Printf("Sending join request from %s to owner %s of room %s\n", user.Name, room.OwnerID, room.Name)
+	if err := a.sseManager.SendToClient(room.OwnerID, EventJoinRequest, payload); err != nil {
+		return "", fmt.Errorf("failed to notify room owner: %v", err)
+	}
+
+	return "Request sent to room owner", nil
+}
+
+// ApproveJoinRequest handles the owner approving a join request
+func (a *App) ApproveJoinRequest(ownerID, requesterID, roomID string) error {
+	a.mu.Lock()
+	room, exists := a.rooms[roomID]
+	if !exists {
+		a.mu.Unlock()
+		return fmt.Errorf("room not found")
+	}
+
+	if room.OwnerID != ownerID {
+		a.mu.Unlock()
+		return fmt.Errorf("permission denied: not room owner")
+	}
+
+	// Add to approved list
+	if !contains(room.ApprovedUserIDs, requesterID) {
+		room.ApprovedUserIDs = append(room.ApprovedUserIDs, requesterID)
+	}
+	a.mu.Unlock()
+
+	_, err := a.JoinRoom(requesterID, roomID)
+	return err
 }

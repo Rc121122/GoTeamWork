@@ -80,8 +80,12 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 		return
 	}
 
-	// For simplicity, since current broadcast to all, and no room context, perhaps use a special roomID like "global"
-	roomID := "global" // or get from context
+	// Host logic: require room
+	if a.currentUser.RoomID == nil {
+		// Host not in a room, cannot share
+		return
+	}
+	roomID := *a.currentUser.RoomID
 
 	// Create item ID
 	itemID := fmt.Sprintf("clip_%d", time.Now().UnixNano())
@@ -96,8 +100,18 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 	// Add operation
 	op := a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem, a.currentUser.ID, a.currentUser.Name)
 
-	// Broadcast sanitized clipboard snapshot to all connected users
-	a.sseManager.BroadcastToAll(EventClipboardCopied, op)
+	// Broadcast to room members
+	a.mu.RLock()
+	room, roomExists := a.rooms[roomID]
+	var members []string
+	if roomExists {
+		members = append(members, room.UserIDs...)
+	}
+	a.mu.RUnlock()
+
+	if roomExists {
+		a.sseManager.BroadcastToUsers(members, EventClipboardCopied, op, "")
+	}
 
 	// If it's a file type and ZipData is empty, start async zipping
 	if item.Type == clip_helper.ClipboardFile && len(item.ZipData) == 0 && len(item.Files) > 0 {
@@ -169,7 +183,18 @@ func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardI
 	}
 
 	if targetOp != nil {
-		a.sseManager.BroadcastToAll(EventClipboardUpdated, targetOp)
+		// Broadcast to room members
+		a.mu.RLock()
+		room, roomExists := a.rooms[roomID]
+		var members []string
+		if roomExists {
+			members = append(members, room.UserIDs...)
+		}
+		a.mu.RUnlock()
+
+		if roomExists {
+			a.sseManager.BroadcastToUsers(members, EventClipboardUpdated, targetOp, "")
+		}
 	}
 }
 

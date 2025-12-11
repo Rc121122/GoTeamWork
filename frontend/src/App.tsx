@@ -13,7 +13,8 @@ import { SettingsModal, AboutModal } from './components/Modals';
 import { AppState } from './types/fsm';
 import { User, Room, InviteEventPayload } from './api/types';
 import { connectSSE, addSSEListener, removeSSEListener } from './sse';
-import { httpAcceptInvite, httpFetchRooms } from './api/httpClient';
+import { httpAcceptInvite, httpFetchRooms, httpApproveJoin } from './api/httpClient';
+import { hostApproveJoin } from './api/wailsBridge';
 import './app.css';
 
 function App() {
@@ -26,6 +27,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [pendingInvite, setPendingInvite] = useState<InviteEventPayload | null>(null);
+  const [joinRequest, setJoinRequest] = useState<{ roomId: string; roomName: string; requesterId: string; requesterName: string } | null>(null);
   
   const [inviterWaiting, setInviterWaiting] = useState(false);
   const [inviterExpiresAt, setInviterExpiresAt] = useState<number>(0);
@@ -129,21 +131,47 @@ function App() {
           setInviterWaiting(false);
       };
 
+      const onJoinRequest = (payload: { roomId: string; roomName: string; requesterId: string; requesterName: string }) => {
+          console.log("Received join request:", payload);
+          setJoinRequest(payload);
+      };
+
       const onDisconnect = () => {
           console.warn("SSE Disconnected");
       };
 
       addSSEListener('user_invited', onInvite);
       addSSEListener('user_joined', onJoin);
+      addSSEListener('join_request', onJoinRequest);
       addSSEListener('disconnected', onDisconnect);
 
       return () => {
           removeSSEListener('user_invited', onInvite);
           removeSSEListener('user_joined', onJoin);
+          removeSSEListener('join_request', onJoinRequest);
           removeSSEListener('disconnected', onDisconnect);
       };
     }
   }, [appMode, currentUser, fetchAndJoinRoom]);
+
+  const handleApproveJoinRequest = async () => {
+      if (!joinRequest || !currentUser) return;
+      try {
+          if (appMode === 'client') {
+              await httpApproveJoin(currentUser.id, joinRequest.requesterId, joinRequest.roomId);
+          } else {
+              await hostApproveJoin(currentUser.id, joinRequest.requesterId, joinRequest.roomId);
+          }
+          setJoinRequest(null);
+      } catch (err) {
+          console.error("Failed to approve join request", err);
+          alert("Failed to approve request");
+      }
+  };
+
+  const handleRejectJoinRequest = () => {
+      setJoinRequest(null);
+  };
 
   const closeHUD = () => {
       setIsHUD(false);
@@ -292,6 +320,38 @@ function App() {
                 style={{ padding: '10px 25px', background: '#c0392b', border: 'none', borderRadius: '5px', color: 'white', cursor: 'pointer', fontSize: '1rem' }}
               >
                 Decline
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Join Request Modal */}
+      {joinRequest && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000
+        }}>
+          <div style={{
+            background: '#2c3e50', padding: '30px', borderRadius: '10px', width: '400px', color: 'white',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.5)', textAlign: 'center'
+          }}>
+            <h3 style={{ marginTop: 0 }}>Join Request</h3>
+            <p style={{ fontSize: '1.1rem', margin: '20px 0' }}>
+              <strong>{joinRequest.requesterName}</strong> wants to join your room <strong>{joinRequest.roomName}</strong>.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '20px' }}>
+              <button 
+                onClick={handleApproveJoinRequest}
+                style={{ padding: '10px 25px', background: '#27ae60', border: 'none', borderRadius: '5px', color: 'white', cursor: 'pointer', fontSize: '1rem' }}
+              >
+                Approve
+              </button>
+              <button 
+                onClick={handleRejectJoinRequest}
+                style={{ padding: '10px 25px', background: '#c0392b', border: 'none', borderRadius: '5px', color: 'white', cursor: 'pointer', fontSize: '1rem' }}
+              >
+                Reject
               </button>
             </div>
           </div>

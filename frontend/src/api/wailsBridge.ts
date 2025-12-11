@@ -29,6 +29,7 @@ function mapRoom(room: main.Room): Room {
   return {
     id: room.id,
     name: room.name,
+    ownerId: (room as any).ownerId, // Cast to any because bindings might not be updated yet
     userIds: [...room.userIds],
   };
 }
@@ -82,8 +83,18 @@ export async function hostInviteUser(userId: string): Promise<string> {
 }
 
 export async function hostJoinRoom(roomId: string, userId: string): Promise<Room> {
-  const room = await JoinRoom(roomId, userId);
+  const room = await JoinRoom(userId, roomId); // Note: Go method is JoinRoom(userID, roomID)
   return mapRoom(room);
+}
+
+export async function hostRequestJoin(userId: string, roomId: string): Promise<string> {
+  // @ts-ignore
+  return window.go.main.App.RequestJoinRoom(userId, roomId);
+}
+
+export async function hostApproveJoin(ownerId: string, requesterId: string, roomId: string): Promise<void> {
+  // @ts-ignore
+  return window.go.main.App.ApproveJoinRequest(ownerId, requesterId, roomId);
 }
 
 export async function hostLeaveRoom(userId: string): Promise<string> {

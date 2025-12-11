@@ -6,6 +6,10 @@ export function AcceptInvite(arg1, arg2) {
   return window['go']['main']['App']['AcceptInvite'](arg1, arg2);
 }
 
+export function ApproveJoinRequest(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ApproveJoinRequest'](arg1, arg2, arg3);
+}
+
 export function CreateRoom(arg1) {
   return window['go']['main']['App']['CreateRoom'](arg1);
 }
@@ -64,6 +68,10 @@ export function LeaveRoom(arg1) {
 
 export function ListAllUsers() {
   return window['go']['main']['App']['ListAllUsers']();
+}
+
+export function RequestJoinRoom(arg1, arg2) {
+  return window['go']['main']['App']['RequestJoinRoom'](arg1, arg2);
 }
 
 export function SendChatMessage(arg1, arg2, arg3) {

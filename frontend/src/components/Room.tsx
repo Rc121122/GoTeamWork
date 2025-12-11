@@ -35,7 +35,7 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
   const refreshOperations = async () => {
     try {
       let ops: Operation[];
-      const roomIdToFetch = "global"; 
+      const roomIdToFetch = currentRoom.id; 
       
       if (appMode === 'client') {
         ops = await httpFetchOperations(roomIdToFetch);

@@ -5,6 +5,8 @@ import {clip_helper} from '../models';
 
 export function AcceptInvite(arg1:string,arg2:string):Promise<string|string>;
 
+export function ApproveJoinRequest(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function CreateRoom(arg1:string):Promise<main.Room>;
 
 export function CreateUser(arg1:string):Promise<main.User>;
@@ -34,6 +36,8 @@ export function JoinRoom(arg1:string,arg2:string):Promise<main.Room>;
 export function LeaveRoom(arg1:string):Promise<string>;
 
 export function ListAllUsers():Promise<Array<main.User>>;
+
+export function RequestJoinRoom(arg1:string,arg2:string):Promise<string>;
 
 export function SendChatMessage(arg1:string,arg2:string,arg3:string):Promise<string>;
 

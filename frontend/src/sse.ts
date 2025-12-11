@@ -17,6 +17,7 @@ export type SSEEventType =
   | 'chat_message' 
   | 'clipboard_copied' 
   | 'clipboard_updated'
+  | 'join_request'
   | 'connected' 
   | 'disconnected';
 
@@ -91,6 +92,11 @@ export function connectSSE(userId: string): void {
     source.addEventListener("clipboard_updated", (event) => {
       console.log("SSE clipboard_updated event received:", event.data);
       dispatch('clipboard_updated', parseEnvelope<any>(event as MessageEvent<string>));
+    });
+
+    source.addEventListener("join_request", (event) => {
+      console.log("SSE join_request event received:", event.data);
+      dispatch('join_request', parseEnvelope<any>(event as MessageEvent<string>));
     });
 
     source.addEventListener("connected", () => {

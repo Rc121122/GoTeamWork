@@ -24,6 +24,7 @@ const (
 	EventClipboardCopied SSEEventType = "clipboard_copied"
 	EventClipboardUpdated SSEEventType = "clipboard_updated"
 	EventUserOffline     SSEEventType = "user_offline"
+	EventJoinRequest     SSEEventType = "join_request"
 )
 
 // SSEEvent represents a server-sent event
