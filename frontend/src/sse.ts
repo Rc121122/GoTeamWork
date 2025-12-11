@@ -88,6 +88,11 @@ export function connectSSE(userId: string): void {
       dispatch('clipboard_copied', parseEnvelope<CopiedItem>(event as MessageEvent<string>));
     });
 
+    source.addEventListener("clipboard_updated", (event) => {
+      console.log("SSE clipboard_updated event received:", event.data);
+      dispatch('clipboard_updated', parseEnvelope<any>(event as MessageEvent<string>));
+    });
+
     source.addEventListener("connected", () => {
       dispatch('connected', null);
     });

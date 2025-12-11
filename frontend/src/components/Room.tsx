@@ -95,6 +95,8 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
         if (op.item && op.item.data) {
              const data = op.item.data as CopiedItem;
              console.log("Updated item text:", data.text);
+        } else {
+             console.warn("Received update with no item data:", op);
         }
         setOperations(prev => {
             const exists = prev.some(o => o.id === op.id || o.itemId === op.itemId);

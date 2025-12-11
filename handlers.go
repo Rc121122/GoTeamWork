@@ -527,7 +527,7 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 	itemData.Text = fmt.Sprintf("%d files compressed (ready)", len(itemData.Files))
 	a.mu.Unlock()
 
-	fmt.Printf("Updated operation %s with zip data\n", opID)
+	fmt.Printf("Updated operation %s with zip data. Text: %s\n", opID, itemData.Text)
 
 	a.sseManager.BroadcastToAll(EventClipboardUpdated, targetOp)
 	w.WriteHeader(http.StatusOK)
