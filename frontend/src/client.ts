@@ -11,6 +11,7 @@ import {
   httpInviteUser,
   httpLeaveRoom,
   httpSendChatMessage,
+  setApiBaseUrl,
 } from "./api/httpClient";
 import type { ChatMessage, CopiedItem, InviteEventPayload, User } from "./api/types";
 
@@ -33,6 +34,7 @@ function renderUsernameInput(): void {
         <h1>GoTeamWork</h1>
         <p>Enter your username to join the collaboration</p>
         <div class="username-input-group">
+          <input type="text" id="server-ip-input" placeholder="Server IP (default: localhost)" value="localhost" />
           <input type="text" id="username-input" placeholder="Enter username..." maxlength="20" />
           <button id="join-button">Join</button>
         </div>
@@ -41,10 +43,11 @@ function renderUsernameInput(): void {
     </div>
   `;
 
+  const serverInput = document.getElementById("server-ip-input") as HTMLInputElement | null;
   const input = document.getElementById("username-input") as HTMLInputElement | null;
   const button = document.getElementById("join-button");
 
-  if (!input || !button) {
+  if (!input || !button || !serverInput) {
     console.error("Username input elements not found");
     return;
   }
@@ -61,9 +64,15 @@ function renderUsernameInput(): void {
 
   const joinWithUsername = async (): Promise<void> => {
     const username = input.value.trim();
+    const serverIp = serverInput.value.trim();
+
     if (!username) {
       showError("username-error", "Please enter a username");
       return;
+    }
+
+    if (serverIp) {
+      setApiBaseUrl(serverIp);
     }
 
     try {

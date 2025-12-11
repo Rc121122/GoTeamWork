@@ -1,4 +1,5 @@
 import { globalState } from "./state";
+import { getApiBaseUrl } from "./api/httpClient";
 import type {
   ChatMessage,
   CopiedItem,
@@ -6,8 +7,6 @@ import type {
   SSEEnvelope,
   User,
 } from "./api/types";
-
-const API_BASE_URL = "http://localhost:8080";
 
 export type SSEEventType = 
   | 'user_created' 
@@ -55,7 +54,7 @@ export function connectSSE(userId: string): void {
       globalState.sseConnection.close();
   }
 
-  const url = `${API_BASE_URL}/api/sse?userId=${encodeURIComponent(userId)}`;
+  const url = `${getApiBaseUrl()}/api/sse?userId=${encodeURIComponent(userId)}`;
 
   const setup = (): void => {
     const source = new EventSource(url);

@@ -12,7 +12,32 @@ import type {
   Operation,
 } from "./types";
 
-const API_BASE_URL = "http://localhost:8080";
+let API_BASE_URL = "http://localhost:8080";
+
+export function setApiBaseUrl(url: string) {
+  // Ensure URL starts with http:// or https://
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    url = "http://" + url;
+  }
+  // Remove trailing slash if present
+  if (url.endsWith("/")) {
+    url = url.slice(0, -1);
+  }
+  // Add port 8080 if no port is specified (optional, but good for this specific app)
+  // However, user might want to specify a different port, so maybe just leave it as is if they provide one.
+  // But if they just type an IP "192.168.1.5", we probably want to append :8080
+  const hasPort = /:\d+$/.test(url);
+  if (!hasPort) {
+    url = url + ":8080";
+  }
+  
+  API_BASE_URL = url;
+  console.log("API Base URL set to:", API_BASE_URL);
+}
+
+export function getApiBaseUrl(): string {
+  return API_BASE_URL;
+}
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
