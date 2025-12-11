@@ -51,9 +51,7 @@ func (a *App) handleUsers(w http.ResponseWriter, r *http.Request) {
 		for _, user := range a.users {
 			if user.Name == sanitizedName {
 				a.mu.RUnlock()
-				// Return existing user instead of error to allow reconnection
-				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(user)
+				http.Error(w, "Username already exists", http.StatusConflict)
 				return
 			}
 		}

@@ -557,24 +557,6 @@ func (a *App) CreateUser(name string) *User {
 		cleanName = fmt.Sprintf("User %d", a.userCounter+1)
 	}
 
-	// Check for name conflict and resolve it
-	originalName := cleanName
-	counter := 1
-	for {
-		conflict := false
-		for _, u := range a.users {
-			if u.Name == cleanName {
-				conflict = true
-				break
-			}
-		}
-		if !conflict {
-			break
-		}
-		cleanName = fmt.Sprintf("%s (%d)", originalName, counter)
-		counter++
-	}
-
 	// Generate user ID based on monotonic counter
 	a.userCounter++
 	userID := fmt.Sprintf("user_%d", a.userCounter)
