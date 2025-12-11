@@ -23,11 +23,12 @@ export function setApiBaseUrl(url: string) {
   if (url.endsWith("/")) {
     url = url.slice(0, -1);
   }
-  // Add port 8080 if no port is specified (optional, but good for this specific app)
-  // However, user might want to specify a different port, so maybe just leave it as is if they provide one.
-  // But if they just type an IP "192.168.1.5", we probably want to append :8080
+  // Add port 8080 only for local IPs without port
+  // Don't add port for cloudflare tunnels or https URLs
   const hasPort = /:\d+$/.test(url);
-  if (!hasPort) {
+  const isCloudflare = url.includes('trycloudflare.com') || url.includes('cloudflare');
+  const isHttps = url.startsWith('https://');
+  if (!hasPort && !isCloudflare && !isHttps) {
     url = url + ":8080";
   }
   

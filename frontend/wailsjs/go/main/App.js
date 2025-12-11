@@ -78,6 +78,10 @@ export function SendChatMessage(arg1, arg2, arg3) {
   return window['go']['main']['App']['SendChatMessage'](arg1, arg2, arg3);
 }
 
+export function SetServerURL(arg1) {
+  return window['go']['main']['App']['SetServerURL'](arg1);
+}
+
 export function SetUser(arg1, arg2) {
   return window['go']['main']['App']['SetUser'](arg1, arg2);
 }

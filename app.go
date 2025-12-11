@@ -606,6 +606,20 @@ func (a *App) GetConnectionStatus() bool {
 	return a.networkClient.IsConnected()
 }
 
+// SetServerURL sets the server URL for the network client (for client mode)
+func (a *App) SetServerURL(url string) {
+	if a.Mode == "client" && a.networkClient != nil {
+		a.networkClient.serverURL = url
+		fmt.Printf("Server URL updated to: %s\n", url)
+		// Try to reconnect with new URL
+		if err := a.networkClient.ConnectToServer(); err != nil {
+			fmt.Printf("Failed to connect to server %s: %v\n", url, err)
+		} else {
+			fmt.Printf("Successfully connected to server %s\n", url)
+		}
+	}
+}
+
 // startCleanupTasks starts background cleanup goroutines for memory management
 func (a *App) startCleanupTasks(ctx context.Context) {
 	// Room cleanup ticker

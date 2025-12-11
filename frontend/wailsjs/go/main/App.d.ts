@@ -41,6 +41,8 @@ export function RequestJoinRoom(arg1:string,arg2:string):Promise<string>;
 
 export function SendChatMessage(arg1:string,arg2:string,arg3:string):Promise<string>;
 
+export function SetServerURL(arg1:string):Promise<void>;
+
 export function SetUser(arg1:string,arg2:string):Promise<main.User>;
 
 export function ShareSystemClipboard():Promise<boolean>;

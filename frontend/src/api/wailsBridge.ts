@@ -10,7 +10,7 @@ import {
   LeaveRoom,
   ListAllUsers,
   SendChatMessage,
-  ShareSystemClipboard,
+  SetServerURL,
   SetUser,
 } from "../../wailsjs/go/main/App";
 import type { main } from "../../wailsjs/go/models";
@@ -129,5 +129,10 @@ export async function hostFetchOperations(roomId: string, sinceId: string = ""):
 
 
 export function shareSystemClipboard(): Promise<boolean> {
-  return ShareSystemClipboard();
+  // @ts-ignore
+  return window.go?.main?.App?.ShareSystemClipboard?.() ?? Promise.resolve(false);
+}
+
+export async function hostSetServerURL(url: string): Promise<void> {
+  await SetServerURL(url);
 }

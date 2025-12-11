@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { hostCreateUser, hostSetUser } from '../api/wailsBridge';
+import { hostCreateUser, hostSetUser, hostSetServerURL } from '../api/wailsBridge';
 import { httpCreateUser, setApiBaseUrl } from '../api/httpClient';
 
 interface NewUserPageProps {
@@ -17,7 +17,21 @@ const NewUserPage: React.FC<NewUserPageProps> = ({ onUserCreated, appMode }) => 
     if (!username.trim()) return;
 
     if (appMode === 'client' && serverIp) {
+      // Handle different URL formats
+      let serverUrl = serverIp;
+      if (!serverIp.includes('://')) {
+        // Plain IP address - add http:// and port
+        serverUrl = `http://${serverIp}:8080`;
+      } else if (serverIp.startsWith('https://')) {
+        // HTTPS URL (like Cloudflare tunnel) - use as is
+        serverUrl = serverIp;
+      } else {
+        // HTTP URL with protocol - check if port needed
+        const hasPort = /:\d+/.test(serverIp.replace(/^https?:\/\//, ''));
+        serverUrl = hasPort ? serverIp : `${serverIp}:8080`;
+      }
       setApiBaseUrl(serverIp);
+      await hostSetServerURL(serverUrl);
     }
 
     try {
