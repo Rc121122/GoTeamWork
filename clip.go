@@ -243,7 +243,7 @@ func startWindowsFilePoller(ctx context.Context, cb func(*clip_helper.ClipboardI
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-	var lastFilePaths map[string]bool = make(map[string]bool)
+	var lastFilePathsHash string
 	var lastDetectionTime time.Time
 
 	for {
@@ -261,20 +261,15 @@ func startWindowsFilePoller(ctx context.Context, cb func(*clip_helper.ClipboardI
 				continue
 			}
 
-			// Check if we have new files
-			hasNewFiles := false
-			for _, path := range item.Files {
-				if !lastFilePaths[path] {
-					hasNewFiles = true
-					lastFilePaths[path] = true
-				}
-			}
+			// Create a hash of the current file paths to detect if they changed
+			currentHash := fmt.Sprintf("%v", item.Files)
 
-			// Only notify if we have new files AND enough time has passed since last detection
+			// Only notify if the file set changed AND enough time has passed since last detection
 			// This prevents multiple notifications for the same file set
 			now := time.Now()
-			if hasNewFiles && now.Sub(lastDetectionTime) > 1*time.Second {
+			if currentHash != lastFilePathsHash && now.Sub(lastDetectionTime) > 1*time.Second {
 				lastDetectionTime = now
+				lastFilePathsHash = currentHash
 				x, y := getMousePosition()
 				cb(item, x, y)
 			}

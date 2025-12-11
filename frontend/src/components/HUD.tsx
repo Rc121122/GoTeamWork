@@ -46,13 +46,16 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
 
   return (
     <div style={{ 
+        position: 'fixed',
+        inset: 0,
         width: '100%', 
         height: '100%', 
         display: 'flex', 
         justifyContent: 'center', 
         alignItems: 'center', 
+        pointerEvents: 'auto',
         background: 'transparent', // Ensure transparent background
-        // @ts-ignore
+        zIndex: 9999,
         WebkitAppRegion: 'drag' // Allow dragging
     }}>
       <img 

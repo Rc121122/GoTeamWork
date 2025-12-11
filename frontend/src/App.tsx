@@ -34,6 +34,20 @@ function App() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [isHUDEnabled, setIsHUDEnabled] = useState(true);
 
+  const HUD_WINDOW_WIDTH = 160;
+  const HUD_WINDOW_HEIGHT = 160;
+  const HUD_WINDOW_VERTICAL_OFFSET = 20;
+
+  const showHudAtCursor = ({ screenX, screenY }: { screenX: number; screenY: number }) => {
+    const targetX = Math.max(0, Math.round(screenX - HUD_WINDOW_WIDTH / 2));
+    const targetY = Math.max(0, Math.round(screenY - HUD_WINDOW_HEIGHT - HUD_WINDOW_VERTICAL_OFFSET));
+    WindowUnmaximise();
+    WindowSetSize(HUD_WINDOW_WIDTH, HUD_WINDOW_HEIGHT);
+    WindowSetPosition(targetX, targetY);
+    WindowSetAlwaysOnTop(true);
+    WindowShow();
+  };
+
   // Timer effect
   useEffect(() => {
       const timer = setInterval(() => {
@@ -99,12 +113,7 @@ function App() {
 
         console.log("HUD Triggered", data);
         setIsHUD(true);
-        // Resize window to small square
-        WindowUnmaximise(); 
-        WindowSetSize(150, 150);
-        WindowSetPosition(data.screenX, data.screenY);
-        WindowSetAlwaysOnTop(true);
-        WindowShow();
+        showHudAtCursor(data);
     });
 
     return () => {
@@ -173,12 +182,12 @@ function App() {
       setJoinRequest(null);
   };
 
-  const closeHUD = () => {
+    const closeHUD = () => {
       setIsHUD(false);
       WindowSetAlwaysOnTop(false);
       WindowSetSize(1024, 768); // Restore default size
       WindowCenter();
-  };
+    };
 
   const handleReboot = () => {
     WindowReload();
@@ -226,10 +235,6 @@ function App() {
     setPendingInvite(null);
   };
 
-  if (isHUD) {
-      return <HUD onClose={closeHUD} />;
-  }
-
   if (state === 'LOADING') {
     return <div style={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh'}}>Loading...</div>;
   }
@@ -260,7 +265,6 @@ function App() {
           onToggleHUD={() => setIsHUDEnabled(!isHUDEnabled)}
       />
       <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
-      
       {/* Inviter Waiting Modal */}
       {inviterWaiting && (
         <div style={{
@@ -357,6 +361,7 @@ function App() {
           </div>
         </div>
       )}
+      {isHUD && <HUD onClose={closeHUD} />}
     </div>
   );
 }
