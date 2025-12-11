@@ -159,10 +159,15 @@ func (n *NetworkClient) SendInvite(inviteeID, inviterID, message string) (string
 }
 
 // UploadClipboardItem uploads a clipboard item to the server
-func (n *NetworkClient) UploadClipboardItem(item *clip_helper.ClipboardItem) (*Operation, error) {
-	jsonData, err := json.Marshal(item)
+func (n *NetworkClient) UploadClipboardItem(item *clip_helper.ClipboardItem, userID, userName string) (*Operation, error) {
+	req := ClipboardUploadRequest{
+		Item:     *item,
+		UserID:   userID,
+		UserName: userName,
+	}
+	jsonData, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal item: %w", err)
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	resp, err := n.httpClient.Post(

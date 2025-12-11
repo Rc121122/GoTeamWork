@@ -84,17 +84,31 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
                 timestamp: Date.now() / 1000
             };
         }
-        setOperations(prev => [...prev, newOp]);
+        setOperations(prev => {
+            if (prev.some(o => o.id === newOp.id)) return prev;
+            return [...prev, newOp];
+        });
     };
 
     const onClipboardUpdated = (op: Operation) => {
         console.log("Received clipboard update via SSE:", op);
-        setOperations(prev => prev.map(o => {
-            if (o.id === op.id || o.itemId === op.itemId) {
-                return op;
+        if (op.item && op.item.data) {
+             const data = op.item.data as CopiedItem;
+             console.log("Updated item text:", data.text);
+        }
+        setOperations(prev => {
+            const exists = prev.some(o => o.id === op.id || o.itemId === op.itemId);
+            if (exists) {
+                return prev.map(o => {
+                    if (o.id === op.id || o.itemId === op.itemId) {
+                        return op;
+                    }
+                    return o;
+                });
+            } else {
+                return [...prev, op];
             }
-            return o;
-        }));
+        });
     };
 
     addSSEListener('chat_message', onChatMsg);
@@ -155,6 +169,9 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
               <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '5px', display: 'flex', alignItems: 'center' }}>
                   <span style={{ marginRight: '5px' }}>
                       {item.type === 'text' ? '📄' : item.type === 'image' ? '🖼️' : item.type === 'file' ? '📁' : '❓'}
+                  </span>
+                  <span style={{ fontWeight: 'bold', marginRight: '5px' }}>
+                      {op.userName || 'Unknown'}
                   </span>
                   {new Date(op.timestamp * 1000).toLocaleTimeString()}
               </div>
@@ -219,7 +236,7 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
         <div style={{ flex: 1, overflowY: 'auto', marginBottom: '10px', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '5px' }}>
           {messages.map(msg => (
             <div key={msg.id} style={{ marginBottom: '5px' }}>
-              <strong>{msg.userName}:</strong> {msg.message}
+              <strong>{msg.userId === currentUser.id ? 'Me' : msg.userName}:</strong> {msg.message}
             </div>
           ))}
           <div ref={chatEndRef} />
@@ -233,6 +250,9 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
           />
           <button type="submit" style={{ padding: '10px' }}>Send</button>
         </form>
+        <div style={{ marginTop: '10px', padding: '5px', borderTop: '1px solid #444', fontSize: '0.9rem', color: '#aaa' }}>
+            Logged in as: <strong>{currentUser.name}</strong>
+        </div>
       </div>
 
       {/* Right Column: Shared Clipboard */}

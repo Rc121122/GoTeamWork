@@ -68,6 +68,8 @@ export namespace main {
 	    itemId: string;
 	    item?: Item;
 	    timestamp: number;
+	    userId?: string;
+	    userName?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Operation(source);
@@ -81,6 +83,8 @@ export namespace main {
 	        this.itemId = source["itemId"];
 	        this.item = this.convertValues(source["item"], Item);
 	        this.timestamp = source["timestamp"];
+	        this.userId = source["userId"];
+	        this.userName = source["userName"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

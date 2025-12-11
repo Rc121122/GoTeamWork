@@ -431,8 +431,8 @@ func (a *App) handleClipboardUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var item clip_helper.ClipboardItem
-	if err := json.NewDecoder(r.Body).Decode(&item); err != nil {
+	var req ClipboardUploadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
@@ -443,12 +443,12 @@ func (a *App) handleClipboardUpload(w http.ResponseWriter, r *http.Request) {
 	histItem := &Item{
 		ID:   itemID,
 		Type: ItemClipboard,
-		Data: &item,
+		Data: &req.Item,
 	}
 
-	fmt.Printf("Received clipboard upload: %d files\n", len(item.Files))
+	fmt.Printf("Received clipboard upload from %s: %d files\n", req.UserName, len(req.Item.Files))
 
-	op := a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem)
+	op := a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem, req.UserID, req.UserName)
 	a.sseManager.BroadcastToAll(EventClipboardCopied, op)
 
 	json.NewEncoder(w).Encode(op)

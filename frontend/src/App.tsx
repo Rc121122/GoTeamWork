@@ -26,6 +26,33 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [pendingInvite, setPendingInvite] = useState<InviteEventPayload | null>(null);
+  
+  const [inviterWaiting, setInviterWaiting] = useState(false);
+  const [inviterExpiresAt, setInviterExpiresAt] = useState<number>(0);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [isHUDEnabled, setIsHUDEnabled] = useState(true);
+
+  // Timer effect
+  useEffect(() => {
+      const timer = setInterval(() => {
+          const now = Date.now() / 1000;
+          if (inviterWaiting && inviterExpiresAt > now) {
+              setTimeLeft(Math.ceil(inviterExpiresAt - now));
+          } else if (pendingInvite && pendingInvite.expiresAt > now) {
+              setTimeLeft(Math.ceil(pendingInvite.expiresAt - now));
+          } else {
+              setTimeLeft(0);
+              if (inviterWaiting) setInviterWaiting(false);
+              if (pendingInvite) setPendingInvite(null);
+          }
+      }, 1000);
+      return () => clearInterval(timer);
+  }, [inviterWaiting, inviterExpiresAt, pendingInvite]);
+
+  const handleInviteSent = (expiresAt: number) => {
+      setInviterExpiresAt(expiresAt);
+      setInviterWaiting(true);
+  };
 
   const fetchAndJoinRoom = useCallback(async (roomId: string) => {
     try {
@@ -54,9 +81,20 @@ function App() {
         setAppMode('client');
         setState('LANDING');
     });
+  }, []);
 
+  useEffect(() => {
     // Listen for HUD trigger
     const cancelListener = EventsOn("clipboard:show-share-button", (data: { screenX: number, screenY: number }) => {
+        if (appMode === 'host') {
+            console.log("HUD ignored in host mode");
+            return;
+        }
+        if (!isHUDEnabled) {
+            console.log("HUD disabled by user");
+            return;
+        }
+
         console.log("HUD Triggered", data);
         setIsHUD(true);
         // Resize window to small square
@@ -70,7 +108,7 @@ function App() {
     return () => {
         if (cancelListener) cancelListener();
     };
-  }, []);
+  }, [appMode, isHUDEnabled]);
 
   // Connect to SSE when currentUser is set (and mode is client)
   useEffect(() => {
@@ -88,6 +126,7 @@ function App() {
           if (payload.userId === currentUser.id) {
              void fetchAndJoinRoom(payload.roomId);
           }
+          setInviterWaiting(false);
       };
 
       const onDisconnect = () => {
@@ -180,15 +219,47 @@ function App() {
         <main className="content" style={{flex: 1, padding: '0', overflow: 'hidden'}}>
             {state === 'LANDING' && <LandingPage onStart={handleStart} />}
             {state === 'NEW_USER' && <NewUserPage onUserCreated={handleUserCreated} appMode={appMode} />}
-            {state === 'LOBBY' && currentUser && <Lobby currentUser={currentUser} onJoinRoom={handleJoinRoom} appMode={appMode} />}
+            {state === 'LOBBY' && currentUser && <Lobby currentUser={currentUser} onJoinRoom={handleJoinRoom} appMode={appMode} onInviteSent={handleInviteSent} />}
             {state === 'ROOM' && currentUser && currentRoom && <RoomView currentUser={currentUser} currentRoom={currentRoom} onLeave={handleLeaveRoom} appMode={appMode} />}
             {state === 'HOST_DASHBOARD' && <HostDashboard />}
         </main>
       </div>
 
-      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+      <SettingsModal 
+          isOpen={showSettings} 
+          onClose={() => setShowSettings(false)} 
+          isHUDEnabled={isHUDEnabled}
+          onToggleHUD={() => setIsHUDEnabled(!isHUDEnabled)}
+      />
       <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
       
+      {/* Inviter Waiting Modal */}
+      {inviterWaiting && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.7)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000
+        }}>
+          <div style={{
+            background: '#2c3e50', padding: '30px', borderRadius: '10px', width: '400px', color: 'white',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.5)', textAlign: 'center'
+          }}>
+            <h3 style={{ marginTop: 0 }}>Invitation Sent</h3>
+            <p style={{ fontSize: '1.1rem', margin: '20px 0' }}>
+              Waiting for user to accept...
+            </p>
+            <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#3498db', marginBottom: '20px' }}>
+              {timeLeft}s
+            </div>
+            <button 
+              onClick={() => setInviterWaiting(false)}
+              style={{ padding: '10px 25px', background: '#95a5a6', border: 'none', borderRadius: '5px', color: 'white', cursor: 'pointer', fontSize: '1rem' }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Invite Modal */}
       {pendingInvite && (
         <div style={{
@@ -203,9 +274,12 @@ function App() {
             <p style={{ fontSize: '1.1rem', margin: '20px 0' }}>
               <strong>{pendingInvite.inviter}</strong> invited you to join a room.
             </p>
-            <p style={{ fontStyle: 'italic', color: '#bdc3c7', marginBottom: '30px' }}>
+            <p style={{ fontStyle: 'italic', color: '#bdc3c7', marginBottom: '20px' }}>
               "{pendingInvite.message}"
             </p>
+            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#e74c3c', marginBottom: '20px' }}>
+              {timeLeft}s
+            </div>
             <div style={{ display: 'flex', justifyContent: 'center', gap: '20px' }}>
               <button 
                 onClick={handleAcceptInvite}

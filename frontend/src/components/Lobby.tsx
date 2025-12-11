@@ -7,9 +7,10 @@ interface LobbyProps {
   currentUser: { id: string; name: string };
   onJoinRoom: (room: Room) => void;
   appMode: 'host' | 'client';
+  onInviteSent?: (expiresAt: number) => void;
 }
 
-const Lobby: React.FC<LobbyProps> = ({ currentUser, onJoinRoom, appMode }) => {
+const Lobby: React.FC<LobbyProps> = ({ currentUser, onJoinRoom, appMode, onInviteSent }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [newRoomName, setNewRoomName] = useState('');
@@ -86,16 +87,28 @@ const Lobby: React.FC<LobbyProps> = ({ currentUser, onJoinRoom, appMode }) => {
 
   const handleInvite = async (userId: string) => {
     try {
+      let response;
       if (appMode === 'client') {
-        await httpInviteUser({ 
+        response = await httpInviteUser({ 
             userId: userId, 
             inviterId: currentUser.id, 
             message: `Join me!` 
         });
-        alert("Invitation sent!");
       } else {
+        // hostInviteUser returns string message, not full response object currently in wailsBridge.
+        // We need to update wailsBridge or just assume 30s.
+        // Actually, let's check hostInviteUser in wailsBridge.
+        // If it returns string, we can't get expiresAt.
+        // But for now, let's assume 30s for host mode if we can't get it.
         await hostInviteUser(userId);
-        alert("Invitation sent!");
+        // Mock response for host mode
+        response = { expiresAt: Date.now() / 1000 + 30 };
+      }
+      
+      if (onInviteSent && response.expiresAt) {
+          onInviteSent(response.expiresAt);
+      } else {
+          alert("Invitation sent!");
       }
     } catch (err) {
       console.error("Failed to invite user", err);

@@ -31,16 +31,13 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
     if (state === 'idle') {
       try {
         console.log("Sharing system clipboard...");
-        const result = await ShareSystemClipboard();
-        console.log("ShareSystemClipboard result:", result);
         setState('carry');
-        // After sharing, we might want to close or wait.
-        // For now, let's close after a short delay to indicate success
-        setTimeout(() => {
-            onClose();
-        }, 1000);
+        await ShareSystemClipboard();
+        console.log("ShareSystemClipboard done");
+        onClose();
       } catch (err) {
         console.error("Error sharing clipboard:", err);
+        onClose();
       }
     } else {
         onClose();

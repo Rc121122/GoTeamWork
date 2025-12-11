@@ -30,7 +30,7 @@ func NewHistoryPool() *HistoryPool {
 }
 
 // AddOperation adds an operation to the history pool with size limits
-func (hp *HistoryPool) AddOperation(roomID string, opType OperationType, itemID string, item *Item) *Operation {
+func (hp *HistoryPool) AddOperation(roomID string, opType OperationType, itemID string, item *Item, userID, userName string) *Operation {
 	hp.mu.Lock()
 	defer hp.mu.Unlock()
 
@@ -50,6 +50,8 @@ func (hp *HistoryPool) AddOperation(roomID string, opType OperationType, itemID 
 		ItemID:    itemID,
 		Item:      item,
 		Timestamp: time.Now().Unix(),
+		UserID:    userID,
+		UserName:  userName,
 	}
 
 	// Add operation to room history
@@ -841,7 +843,7 @@ func (a *App) SendChatMessage(roomID, userID, message string) string {
 	}
 
 	// Add operation and notify consumers about the delta (not the entire history)
-	a.historyPool.AddOperation(roomID, OpAdd, msg.ID, item)
+	a.historyPool.AddOperation(roomID, OpAdd, msg.ID, item, userID, userName)
 	// Broadcast to all members including the sender (pass empty string as excludeUserID)
 	a.sseManager.BroadcastToUsers(members, EventChatMessage, msg, "")
 

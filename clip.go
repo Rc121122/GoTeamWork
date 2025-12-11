@@ -67,7 +67,7 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 
 	if a.Mode == "client" {
 		// Upload to server
-		op, err := a.networkClient.UploadClipboardItem(item)
+		op, err := a.networkClient.UploadClipboardItem(item, a.currentUser.ID, a.currentUser.Name)
 		if err != nil {
 			fmt.Printf("Failed to upload clipboard item: %v\n", err)
 			return
@@ -94,7 +94,7 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 	}
 
 	// Add operation
-	op := a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem)
+	op := a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem, a.currentUser.ID, a.currentUser.Name)
 
 	// Broadcast sanitized clipboard snapshot to all connected users
 	a.sseManager.BroadcastToAll(EventClipboardCopied, op)

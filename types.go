@@ -3,6 +3,8 @@ package main
 import (
 	"sync"
 	"time"
+
+	"GOproject/clip_helper"
 )
 
 // User represents a user in the system
@@ -69,6 +71,8 @@ type Operation struct {
 	ItemID    string        `json:"itemId"`
 	Item      *Item         `json:"item,omitempty"`
 	Timestamp int64         `json:"timestamp"`
+	UserID    string        `json:"userId,omitempty"`
+	UserName  string        `json:"userName,omitempty"`
 }
 
 // HistoryPool manages operations for all rooms
@@ -79,6 +83,12 @@ type HistoryPool struct {
 }
 
 // HTTP Request/Response Types
+type ClipboardUploadRequest struct {
+	Item     clip_helper.ClipboardItem `json:"item"`
+	UserID   string                    `json:"userId"`
+	UserName string                    `json:"userName"`
+}
+
 type CreateUserRequest struct {
 	Name string `json:"name"`
 }

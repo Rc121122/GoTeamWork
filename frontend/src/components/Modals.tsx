@@ -29,9 +29,29 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
   );
 };
 
-export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> = (props) => (
-  <Modal {...props} title="Settings">
-    <p>App settings will go here.</p>
+interface SettingsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  isHUDEnabled: boolean;
+  onToggleHUD: () => void;
+}
+
+export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, isHUDEnabled, onToggleHUD }) => (
+  <Modal isOpen={isOpen} onClose={onClose} title="Settings">
+    <div style={{ marginBottom: '20px' }}>
+      <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+        <input 
+          type="checkbox" 
+          checked={isHUDEnabled} 
+          onChange={onToggleHUD}
+          style={{ marginRight: '10px', transform: 'scale(1.2)' }}
+        />
+        <span>Enable Clipboard Sharing HUD</span>
+      </label>
+      <p style={{ fontSize: '0.8rem', color: '#bdc3c7', marginLeft: '25px', marginTop: '5px' }}>
+        When enabled, a small popup will appear when you copy text/files, allowing you to share them.
+      </p>
+    </div>
     <p>Version: 1.0.0</p>
   </Modal>
 );

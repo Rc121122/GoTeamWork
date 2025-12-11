@@ -1,8 +1,8 @@
 ## ToDo:
-1. add user name and time stamp next to shared clip item.
-2. add invite pending countdown timer for the inviter.
-3. add toggle button to lock shared clipboard and HUD switching.
+1. [x] Add my user name at the bottom when inside a room. Change username to "me" for my own messages.
 
 ## Fix next:
-1. Not fixed! HUD icon is not transparent in mac, search for online solution.
+1. [x] Sometimes the zip file says "compressing", but host actually finished, check for SSE to ensure it broadcast the download link for all users. (Implemented upsert logic for clipboard updates to handle missed events)
+
+pend. Not fixed! HUD icon is not transparent in mac, search for online solution.
 suggest resource: https://github.com/wailsapp/wails/issues/3036

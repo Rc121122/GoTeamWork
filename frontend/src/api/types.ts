@@ -93,6 +93,8 @@ export interface Operation {
     data: ChatMessage | CopiedItem;
   };
   timestamp: number;
+  userId?: string;
+  userName?: string;
 }
 
 export type AppMode = "host" | "client";
