@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { hostCreateUser, hostSetUser, hostSetServerURL } from '../api/wailsBridge';
-import { httpCreateUser, setApiBaseUrl } from '../api/httpClient';
+import { httpCreateUser, setApiBaseUrl, parseServerUrl } from '../api/httpClient';
 
 interface NewUserPageProps {
   onUserCreated: (user: { id: string; name: string }) => void;
@@ -9,49 +9,52 @@ interface NewUserPageProps {
 
 const NewUserPage: React.FC<NewUserPageProps> = ({ onUserCreated, appMode }) => {
   const [username, setUsername] = useState('');
-  const [serverIp, setServerIp] = useState('localhost');
+  const [serverAddress, setServerAddress] = useState('');
   const [error, setError] = useState('');
+  const [connecting, setConnecting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim()) return;
-
-    if (appMode === 'client' && serverIp) {
-      // Handle different URL formats
-      let serverUrl = serverIp;
-      if (!serverIp.includes('://')) {
-        // Plain IP address - add http:// and port
-        serverUrl = `http://${serverIp}:8080`;
-      } else if (serverIp.startsWith('https://')) {
-        // HTTPS URL (like Cloudflare tunnel) - use as is
-        serverUrl = serverIp;
-      } else {
-        // HTTP URL with protocol - check if port needed
-        const hasPort = /:\d+/.test(serverIp.replace(/^https?:\/\//, ''));
-        serverUrl = hasPort ? serverIp : `${serverIp}:8080`;
-      }
-      setApiBaseUrl(serverIp);
-      await hostSetServerURL(serverUrl);
+    if (!username.trim()) {
+      setError('Please enter a username');
+      return;
     }
+
+    setError('');
+    setConnecting(true);
 
     try {
       let user: { id: string; name: string };
+      
       if (appMode === 'client') {
-        // 1. Create user on Host
+        // Parse and set server URL for both frontend HTTP client and backend network client
+        const serverUrl = parseServerUrl(serverAddress);
+        console.log('Connecting to server:', serverUrl);
+        
+        setApiBaseUrl(serverAddress); // Frontend HTTP client
+        await hostSetServerURL(serverUrl); // Backend network client
+        
+        // Create user on remote Host server
         user = await httpCreateUser({ name: username });
-        // 2. Sync user to local Wails backend
+        // Sync user to local Wails backend
         await hostSetUser(user.id, user.name);
       } else {
+        // Host mode - create user locally
         user = await hostCreateUser(username);
       }
+      
       onUserCreated(user);
     } catch (err: any) {
-      console.error(err);
+      console.error('Connection error:', err);
       if (err.status === 409) {
-        setError('Username already exists');
+        setError('Username already exists. Please choose another.');
+      } else if (err.message?.includes('fetch') || err.message?.includes('network')) {
+        setError('Cannot connect to server. Please check the address and try again.');
       } else {
-        setError('Failed to create user. Check server connection.');
+        setError(`Connection failed: ${err.message || 'Unknown error'}`);
       }
+    } finally {
+      setConnecting(false);
     }
   };
 
@@ -62,18 +65,26 @@ const NewUserPage: React.FC<NewUserPageProps> = ({ onUserCreated, appMode }) => 
           <p className="pill" style={{ display: 'inline-block' }}>Profile</p>
           <h1 style={{ marginBottom: '8px' }}>Create your profile</h1>
           <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>
-            Choose a username and connect to your host server.
+            {appMode === 'client' 
+              ? 'Enter the server address and your username to connect.'
+              : 'Choose a username to start hosting.'}
           </p>
           <div className="card-section">
             <form onSubmit={handleSubmit} className="username-input-group" style={{ margin: 0 }}>
               {appMode === 'client' && (
-                <input
-                  type="text"
-                  placeholder="Server IP (default: localhost)"
-                  value={serverIp}
-                  onChange={(e) => setServerIp(e.target.value)}
-                  className="text-input"
-                />
+                <>
+                  <input
+                    type="text"
+                    placeholder="Server Address (leave empty for localhost)"
+                    value={serverAddress}
+                    onChange={(e) => setServerAddress(e.target.value)}
+                    className="text-input"
+                    disabled={connecting}
+                  />
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 12px 0' }}>
+                    Examples: <code>192.168.1.100</code> (LAN) or <code>https://xxx.trycloudflare.com</code> (tunnel)
+                  </p>
+                </>
               )}
               <input
                 type="text"
@@ -81,18 +92,22 @@ const NewUserPage: React.FC<NewUserPageProps> = ({ onUserCreated, appMode }) => 
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="text-input"
+                disabled={connecting}
               />
-              <button type="submit" className="primary-btn">Create</button>
+              <button type="submit" className="primary-btn" disabled={connecting}>
+                {connecting ? 'Connecting...' : 'Connect'}
+              </button>
             </form>
-            {error && <p className="error-message" style={{ display: 'block' }}>{error}</p>}
+            {error && <p className="error-message" style={{ display: 'block', marginTop: '12px' }}>{error}</p>}
           </div>
         </div>
         <div className="card-section">
-          <h3 style={{ marginTop: 0 }}>Tips</h3>
-          <ul style={{ margin: '12px 0 0 16px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            <li>Use your host machine IP for client connections.</li>
-            <li>Usernames must be unique; conflicts return 409.</li>
-            <li>After creation, you will enter the lobby to join or create rooms.</li>
+          <h3 style={{ marginTop: 0 }}>Connection Guide</h3>
+          <ul style={{ margin: '12px 0 0 16px', color: 'var(--text-muted)', lineHeight: 1.8 }}>
+            <li><strong>Same machine:</strong> Leave address empty or use <code>localhost</code></li>
+            <li><strong>LAN:</strong> Use host's IP address (e.g., <code>192.168.1.100</code>)</li>
+            <li><strong>Internet (Cloudflare):</strong> Use the full tunnel URL</li>
+            <li>Usernames must be unique across the server</li>
           </ul>
         </div>
       </div>

@@ -14,25 +14,41 @@ import type {
 
 let API_BASE_URL = "http://localhost:8080";
 
-export function setApiBaseUrl(url: string) {
-  // Ensure URL starts with http:// or https://
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    url = "http://" + url;
-  }
-  // Remove trailing slash if present
-  if (url.endsWith("/")) {
-    url = url.slice(0, -1);
-  }
-  // Add port 8080 only for local IPs without port
-  // Don't add port for cloudflare tunnels or https URLs
-  const hasPort = /:\d+$/.test(url);
-  const isCloudflare = url.includes('trycloudflare.com') || url.includes('cloudflare');
-  const isHttps = url.startsWith('https://');
-  if (!hasPort && !isCloudflare && !isHttps) {
-    url = url + ":8080";
+/**
+ * Parse and normalize server URL for different connection types:
+ * - localhost or 127.0.0.1 -> http://localhost:8080
+ * - LAN IP (192.168.x.x, 10.x.x.x) -> http://IP:8080
+ * - Cloudflare tunnel (https://xxx.trycloudflare.com) -> use as-is (no port)
+ * - Custom URL with port -> use as-is
+ */
+export function parseServerUrl(input: string): string {
+  let url = input.trim();
+  
+  // Empty or default
+  if (!url || url === 'localhost') {
+    return 'http://localhost:8080';
   }
   
-  API_BASE_URL = url;
+  // Already has protocol
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    // HTTPS URLs (like Cloudflare tunnels) - don't add port
+    if (url.startsWith('https://')) {
+      return url.replace(/\/$/, ''); // Remove trailing slash only
+    }
+    // HTTP URL - add port if missing
+    const hasPort = /:(\/\/[^/]+):\d+/.test(url) || /:\d+(\/|$)/.test(url.replace('http://', ''));
+    if (!hasPort) {
+      url = url.replace(/\/$/, '') + ':8080';
+    }
+    return url.replace(/\/$/, '');
+  }
+  
+  // No protocol - assume HTTP and add port
+  return `http://${url}:8080`.replace(/:8080:8080/, ':8080'); // Prevent double port
+}
+
+export function setApiBaseUrl(input: string) {
+  API_BASE_URL = parseServerUrl(input);
   console.log("API Base URL set to:", API_BASE_URL);
 }
 

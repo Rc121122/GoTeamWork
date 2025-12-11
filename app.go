@@ -260,16 +260,9 @@ func (a *App) startup(ctx context.Context) {
 		// Start cleanup goroutines for host mode
 		go a.startCleanupTasks(ctx)
 	} else if a.Mode == "client" {
-		// Initialize network client for client mode
-		a.networkClient = NewNetworkClient("http://localhost:8080")
-
-		// Try to connect to server
-		if err := a.networkClient.ConnectToServer(); err != nil {
-			fmt.Printf("Warning: Could not connect to server: %v\n", err)
-			fmt.Println("Please make sure the host is running in host mode")
-		} else {
-			fmt.Println("Connected to central server; streaming updates over SSE")
-		}
+		// Initialize network client for client mode (URL will be set when user connects)
+		a.networkClient = NewNetworkClient("")
+		fmt.Println("Client mode initialized. Please enter server address to connect.")
 	}
 
 	// Start clipboard monitoring for copy hotkey
@@ -607,17 +600,19 @@ func (a *App) GetConnectionStatus() bool {
 }
 
 // SetServerURL sets the server URL for the network client (for client mode)
+// Supports: localhost, LAN IPs (192.168.x.x), and Cloudflare tunnels (https://xxx.trycloudflare.com)
 func (a *App) SetServerURL(url string) {
-	if a.Mode == "client" && a.networkClient != nil {
-		a.networkClient.serverURL = url
-		fmt.Printf("Server URL updated to: %s\n", url)
-		// Try to reconnect with new URL
-		if err := a.networkClient.ConnectToServer(); err != nil {
-			fmt.Printf("Failed to connect to server %s: %v\n", url, err)
-		} else {
-			fmt.Printf("Successfully connected to server %s\n", url)
-		}
+	if a.Mode != "client" || a.networkClient == nil {
+		fmt.Println("SetServerURL: Not in client mode or network client not initialized")
+		return
 	}
+	
+	// URL should already be properly formatted from frontend
+	// Just set it directly
+	a.networkClient.serverURL = url
+	fmt.Printf("Server URL set to: %s\n", url)
+	
+	// Don't auto-connect here - connection will happen when user creates account
 }
 
 // startCleanupTasks starts background cleanup goroutines for memory management
@@ -922,24 +917,43 @@ func (a *App) GetOperations(roomID, sinceID string) []*Operation {
 	return a.historyPool.GetOperations(roomID, sinceID)
 }
 
+// corsMiddleware wraps a handler with CORS headers
+func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers for all requests
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
+		
+		// Handle preflight OPTIONS request
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		
+		next(w, r)
+	}
+}
+
 // StartHTTPServer starts the HTTP server for REST API
 func (a *App) StartHTTPServer(port string) {
-	http.HandleFunc("/api/users", a.handleUsers)
-	http.HandleFunc("/api/users/", a.handleUserByID)
-	http.HandleFunc("/api/rooms", a.handleRooms)
-	http.HandleFunc("/api/invite", a.handleInvite)
-	http.HandleFunc("/api/invite/accept", a.handleAcceptInvite)
-	http.HandleFunc("/api/join", a.handleJoinRoom)
-	http.HandleFunc("/api/chat", a.handleChat)
-	http.HandleFunc("/api/chat/", a.handleChat)
-	http.HandleFunc("/api/operations/", a.handleOperations)
-	http.HandleFunc("/api/join/request", a.handleJoinRequest)
-	http.HandleFunc("/api/join/approve", a.handleApproveJoin)
-	http.HandleFunc("/api/download/", a.handleDownload)
-	http.HandleFunc("/api/clipboard", a.handleClipboardUpload)
-	http.HandleFunc("/api/clipboard/", a.handleZipUpload)
-	http.HandleFunc("/api/leave", a.handleLeave)
-	http.HandleFunc("/api/sse", a.handleSSE)
+	http.HandleFunc("/api/users", corsMiddleware(a.handleUsers))
+	http.HandleFunc("/api/users/", corsMiddleware(a.handleUserByID))
+	http.HandleFunc("/api/rooms", corsMiddleware(a.handleRooms))
+	http.HandleFunc("/api/invite", corsMiddleware(a.handleInvite))
+	http.HandleFunc("/api/invite/accept", corsMiddleware(a.handleAcceptInvite))
+	http.HandleFunc("/api/join", corsMiddleware(a.handleJoinRoom))
+	http.HandleFunc("/api/chat", corsMiddleware(a.handleChat))
+	http.HandleFunc("/api/chat/", corsMiddleware(a.handleChat))
+	http.HandleFunc("/api/operations/", corsMiddleware(a.handleOperations))
+	http.HandleFunc("/api/join/request", corsMiddleware(a.handleJoinRequest))
+	http.HandleFunc("/api/join/approve", corsMiddleware(a.handleApproveJoin))
+	http.HandleFunc("/api/download/", corsMiddleware(a.handleDownload))
+	http.HandleFunc("/api/clipboard", corsMiddleware(a.handleClipboardUpload))
+	http.HandleFunc("/api/clipboard/", corsMiddleware(a.handleZipUpload))
+	http.HandleFunc("/api/leave", corsMiddleware(a.handleLeave))
+	http.HandleFunc("/api/sse", corsMiddleware(a.handleSSE))
 
 	fmt.Printf("Starting HTTP server on port %s\n", port)
 	go http.ListenAndServe(":"+port, nil)
