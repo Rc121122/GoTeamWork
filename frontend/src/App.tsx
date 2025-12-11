@@ -239,6 +239,11 @@ function App() {
     return <div style={{display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh'}}>Loading...</div>;
   }
 
+  // When HUD is active, render ONLY the HUD with solid background
+  if (isHUD) {
+    return <HUD onClose={closeHUD} />;
+  }
+
   return (
     <div className="app-container">
       <TitleBar />
@@ -361,7 +366,6 @@ function App() {
           </div>
         </div>
       )}
-      {isHUD && <HUD onClose={closeHUD} />}
     </div>
   );
 }

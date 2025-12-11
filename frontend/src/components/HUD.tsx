@@ -18,15 +18,6 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
     return () => clearTimeout(timer);
   }, [onClose]);
 
-  // Make body transparent for HUD
-  React.useEffect(() => {
-    const originalBackground = document.body.style.background;
-    document.body.style.background = 'transparent';
-    return () => {
-      document.body.style.background = originalBackground;
-    };
-  }, []);
-
   const handleClick = async () => {
     if (state === 'idle') {
       try {
@@ -54,16 +45,27 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
         justifyContent: 'center', 
         alignItems: 'center', 
         pointerEvents: 'auto',
-        background: 'transparent', // Ensure transparent background
+        background: '#1e293b', // Solid dark background - no transparency
         zIndex: 9999,
-        WebkitAppRegion: 'drag' // Allow dragging
+        WebkitAppRegion: 'drag', // Allow dragging
     }}>
-      <img 
-        src={state === 'idle' ? gopherIdle : gopherCarry} 
-        alt="Gopher" 
-        style={{ width: '100px', cursor: 'pointer', WebkitAppRegion: 'no-drag', backgroundColor: 'transparent' } as React.CSSProperties} 
-        onClick={handleClick}
-      />
+      <div style={{
+        width: '140px',
+        height: '140px',
+        borderRadius: '16px',
+        background: 'linear-gradient(135deg, #334155 0%, #1e293b 100%)',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+      }}>
+        <img 
+          src={state === 'idle' ? gopherIdle : gopherCarry} 
+          alt="Gopher" 
+          style={{ width: '100px', cursor: 'pointer', WebkitAppRegion: 'no-drag' } as React.CSSProperties} 
+          onClick={handleClick}
+        />
+      </div>
     </div>
   );
 };
