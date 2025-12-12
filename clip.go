@@ -62,6 +62,31 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 		}
 	}
 
+	// Check file sizes for file clipboard items
+	if item.Type == clip_helper.ClipboardFile && len(item.Files) > 0 {
+		const maxIndividualFileSize = 500 * 1024 * 1024 // 500MB per file
+		const maxTotalFiles = 100 // Maximum 100 files
+
+		if len(item.Files) > maxTotalFiles {
+			fmt.Printf("Too many files: %d (max %d), skipping\n", len(item.Files), maxTotalFiles)
+			return
+		}
+
+		for _, filePath := range item.Files {
+			info, err := os.Stat(filePath)
+			if err != nil {
+				fmt.Printf("Failed to stat file %s: %v, skipping\n", filePath, err)
+				return
+			}
+			if info.Size() > maxIndividualFileSize {
+				fmt.Printf("File %s too large: %d bytes (max %d bytes), skipping\n",
+					filePath, info.Size(), maxIndividualFileSize)
+				return
+			}
+		}
+		fmt.Printf("File validation passed: %d files\n", len(item.Files))
+	}
+
 	// Assume roomID from current room or something, but since broadcast to all, perhaps global or per room.
 	// For now, use a default room or broadcast to all rooms.
 	// To fit, perhaps add to a global room or modify.
@@ -123,6 +148,29 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardItem, serverOpID string) {
 	fmt.Printf("Starting async zip for item %s with %d files\n", itemID, len(item.Files))
 
+	// Check total file size before compression (limit to 1GB)
+	const maxZipSize = 1 << 30 // 1GB
+	var totalSize int64 = 0
+
+	for _, filePath := range item.Files {
+		info, err := os.Stat(filePath)
+		if err != nil {
+			fmt.Printf("Failed to stat file %s: %v\n", filePath, err)
+			continue
+		}
+		totalSize += info.Size()
+	}
+
+	if totalSize > maxZipSize {
+		fmt.Printf("Total file size %d bytes exceeds limit of %d bytes, skipping compression\n", totalSize, maxZipSize)
+		a.mu.Lock()
+		item.Text = fmt.Sprintf("Files too large to compress (%d MB > %d MB limit)", totalSize/(1024*1024), maxZipSize/(1024*1024))
+		a.mu.Unlock()
+		return
+	}
+
+	fmt.Printf("Total file size: %d bytes, proceeding with compression\n", totalSize)
+
 	// Create a temp zip file
 	tmpFile, err := os.CreateTemp("", "clipboard_files_*.zip")
 	if err != nil {
@@ -134,6 +182,22 @@ func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardI
 
 	if err := clip_helper.ZipFiles(item.Files, tmpFile); err != nil {
 		fmt.Printf("Failed to zip files: %v\n", err)
+		return
+	}
+
+	// Check the final zip file size
+	zipInfo, err := tmpFile.Stat()
+	if err != nil {
+		fmt.Printf("Failed to stat zip file: %v\n", err)
+		return
+	}
+
+	zipSize := zipInfo.Size()
+	if zipSize > maxZipSize {
+		fmt.Printf("Compressed zip size %d bytes exceeds limit of %d bytes\n", zipSize, maxZipSize)
+		a.mu.Lock()
+		item.Text = fmt.Sprintf("Compressed size too large (%d MB > %d MB limit)", zipSize/(1024*1024), maxZipSize/(1024*1024))
+		a.mu.Unlock()
 		return
 	}
 

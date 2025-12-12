@@ -726,10 +726,20 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("Received zip upload for op: %s\n", opID)
 
-	zipData, err := io.ReadAll(r.Body)
+	// Limit zip upload size to 1GB
+	const maxZipSize = 1 << 30 // 1GB
+	limitedReader := io.LimitReader(r.Body, maxZipSize+1) // +1 to detect if over limit
+
+	zipData, err := io.ReadAll(limitedReader)
 	if err != nil {
 		fmt.Printf("Failed to read zip body: %v\n", err)
 		http.Error(w, "Failed to read body", http.StatusInternalServerError)
+		return
+	}
+
+	if len(zipData) > maxZipSize {
+		fmt.Printf("Zip data size %d bytes exceeds limit of %d bytes\n", len(zipData), maxZipSize)
+		http.Error(w, "Zip file too large (max 1GB)", http.StatusRequestEntityTooLarge)
 		return
 	}
 

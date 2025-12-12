@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -195,11 +196,19 @@ func (n *NetworkClient) UploadClipboardItem(item *clip_helper.ClipboardItem, use
 
 // UploadZipData uploads zip data for a specific operation
 func (n *NetworkClient) UploadZipData(opID string, zipData []byte) error {
-	resp, err := n.httpClient.Post(
-		fmt.Sprintf("%s/api/clipboard/%s/zip", n.serverURL, opID),
-		"application/zip",
-		bytes.NewBuffer(zipData),
-	)
+	// Create a request with extended timeout for large file uploads
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/clipboard/%s/zip", n.serverURL, opID), bytes.NewBuffer(zipData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/zip")
+
+	// Use a longer timeout for zip uploads (30 minutes for very large files)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	resp, err := n.httpClient.Do(req)
 	if err != nil {
 		n.setDisconnected()
 		return fmt.Errorf("failed to upload zip data: %w", err)

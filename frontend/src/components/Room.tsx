@@ -323,6 +323,20 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
                                   >
                                       📥 Download Files
                                   </button>
+                              ) : item.text && (item.text.includes('too large') || item.text.includes('exceeds limit')) ? (
+                                  <div style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                      padding: '8px 16px',
+                                      background: 'rgba(239, 68, 68, 0.1)',
+                                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                                      borderRadius: '6px',
+                                      color: '#fca5a5',
+                                      fontSize: '0.9rem'
+                                  }}>
+                                      ⚠️ {item.text}
+                                  </div>
                               ) : (
                                   <div style={{
                                       display: 'inline-flex',
