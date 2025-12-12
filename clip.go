@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"GOproject/clip_helper"
@@ -64,8 +67,8 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 
 	// Check file sizes for file clipboard items
 	if item.Type == clip_helper.ClipboardFile && len(item.Files) > 0 {
-		const maxIndividualFileSize = 500 * 1024 * 1024 // 500MB per file
-		const maxTotalFiles = 100 // Maximum 100 files
+		const maxIndividualFileSize = 10 * 1024 * 1024 * 1024 // 10GB per file
+		const maxTotalFiles = 100                             // Maximum 100 files
 
 		if len(item.Files) > maxTotalFiles {
 			fmt.Printf("Too many files: %d (max %d), skipping\n", len(item.Files), maxTotalFiles)
@@ -148,8 +151,14 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardItem, serverOpID string) {
 	fmt.Printf("Starting async zip for item %s with %d files\n", itemID, len(item.Files))
 
-	// Check total file size before compression (limit to 1GB)
-	const maxZipSize = 1 << 30 // 1GB
+	// Direct send for single-file shares
+	if len(item.Files) == 1 {
+		a.processSingleFileShare(roomID, itemID, item, serverOpID)
+		return
+	}
+
+	// Check total file size before compression (limit to 10GB)
+	const maxZipSize = 10 * 1024 * 1024 * 1024 // 10GB
 	var totalSize int64 = 0
 
 	for _, filePath := range item.Files {
@@ -232,7 +241,54 @@ func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardI
 		return
 	}
 
-	// Broadcast update - important: send updated operation with ZIP data
+	a.broadcastClipboardUpdate(roomID, itemID)
+}
+
+func (a *App) processSingleFileShare(roomID, itemID string, item *clip_helper.ClipboardItem, serverOpID string) {
+	filePath := item.Files[0]
+	info, err := os.Stat(filePath)
+	if err != nil {
+		fmt.Printf("Failed to stat single file %s: %v\n", filePath, err)
+		return
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Printf("Failed to read single file %s: %v\n", filePath, err)
+		return
+	}
+
+	fileName := filepath.Base(filePath)
+	mimeType := detectMimeType(fileName)
+	thumb := buildFileThumb(fileName)
+
+	a.mu.Lock()
+	item.IsSingleFile = true
+	item.SingleFileName = fileName
+	item.SingleFileMime = mimeType
+	item.SingleFileSize = info.Size()
+	item.SingleFileThumb = thumb
+	item.SingleFileData = data
+	item.ZipData = nil
+	item.Text = fmt.Sprintf("%s (%s) ready", fileName, clip_helper.HumanFileSize(info.Size()))
+	a.mu.Unlock()
+
+	fmt.Printf("Prepared single file share %s (%d bytes)\n", fileName, len(data))
+
+	if a.Mode == "client" {
+		if serverOpID != "" {
+			if err := a.networkClient.UploadSingleFileData(serverOpID, data, fileName, mimeType, info.Size(), thumb); err != nil {
+				fmt.Printf("Failed to upload single file data: %v\n", err)
+			}
+			fmt.Printf("Uploaded single file data for op %s\n", serverOpID)
+		}
+		return
+	}
+
+	a.broadcastClipboardUpdate(roomID, itemID)
+}
+
+func (a *App) broadcastClipboardUpdate(roomID, itemID string) {
 	ops := a.historyPool.GetOperations(roomID, "", "")
 	var targetOp *Operation
 	for _, op := range ops {
@@ -242,23 +298,44 @@ func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardI
 		}
 	}
 
-	if targetOp != nil {
-		// Broadcast to room members
-		a.mu.RLock()
-		room, roomExists := a.rooms[roomID]
-		var members []string
-		if roomExists {
-			members = append(members, room.UserIDs...)
-		}
-		a.mu.RUnlock()
-
-		if roomExists {
-			fmt.Printf("Broadcasting clipboard update for item %s with ZIP data\n", itemID)
-			a.sseManager.BroadcastToUsers(members, EventClipboardUpdated, targetOp, "")
-		}
-	} else {
+	if targetOp == nil {
 		fmt.Printf("Warning: Could not find operation for item %s to broadcast update\n", itemID)
+		return
 	}
+
+	a.mu.RLock()
+	room, roomExists := a.rooms[roomID]
+	var members []string
+	if roomExists {
+		members = append(members, room.UserIDs...)
+	}
+	a.mu.RUnlock()
+
+	if roomExists {
+		fmt.Printf("Broadcasting clipboard update for item %s\n", itemID)
+		a.sseManager.BroadcastToUsers(members, EventClipboardUpdated, targetOp, "")
+	}
+}
+
+func detectMimeType(name string) string {
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext != "" {
+		if mt := mime.TypeByExtension(ext); mt != "" {
+			return mt
+		}
+	}
+	return "application/octet-stream"
+}
+
+func buildFileThumb(name string) string {
+	ext := strings.TrimPrefix(strings.ToUpper(filepath.Ext(name)), ".")
+	if ext == "" {
+		ext = strings.ToUpper(name)
+	}
+	if len(ext) > 4 {
+		ext = ext[:4]
+	}
+	return ext
 }
 
 // StartClipboardWatcher listens for clipboard changes.

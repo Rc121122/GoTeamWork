@@ -527,11 +527,22 @@ func (a *App) InviteWithRoom(inviteeID, inviterID, message string) (string, stri
 		return "", "Error: Inviter not found", 0
 	}
 
+	// If inviter is already in a room, use that room for the invite; otherwise a new room will be created on accept.
+	var targetRoomID string
+	var targetRoomName string
 	if inviter.RoomID != nil {
-		return "", "Error: Inviter already in a room", 0
+		room, ok := a.rooms[*inviter.RoomID]
+		if !ok {
+			return "", "Error: Inviter's room not found", 0
+		}
+		targetRoomID = room.ID
+		targetRoomName = room.Name
 	}
 
 	if invitee.RoomID != nil {
+		if targetRoomID != "" && *invitee.RoomID == targetRoomID {
+			return "", "Error: Invitee already in this room", 0
+		}
 		return "", "Error: Invitee already in a room", 0
 	}
 
@@ -549,6 +560,7 @@ func (a *App) InviteWithRoom(inviteeID, inviterID, message string) (string, stri
 		InviterID: inviterID,
 		InviteeID: inviteeID,
 		Message:   cleanMessage,
+		RoomID:    targetRoomID,
 		CreatedAt: createdAt,
 		ExpiresAt: expiresAt,
 	}
@@ -560,6 +572,10 @@ func (a *App) InviteWithRoom(inviteeID, inviterID, message string) (string, stri
 		"inviter":   inviter.Name,
 		"message":   cleanMessage,
 		"expiresAt": expiresAt.Unix(),
+	}
+	if targetRoomID != "" {
+		payload["roomId"] = targetRoomID
+		payload["roomName"] = targetRoomName
 	}
 	fmt.Printf("Sending invite %s from %s (%s) to %s (%s)\n", inviteID, inviter.Name, inviterID, invitee.Name, inviteeID)
 	if err := a.sseManager.SendToClient(inviteeID, EventUserInvited, payload); err != nil {
@@ -619,6 +635,42 @@ func (a *App) AcceptInvite(inviteID, inviteeID string) (string, string) {
 		delete(a.pendingInvites, inviteID)
 		a.mu.Unlock()
 		return "", "Error: User not found"
+	}
+
+	// If this invite targets an existing room, join that room instead of creating a new one.
+	if pending.RoomID != "" {
+		if inviter.RoomID == nil || *inviter.RoomID != pending.RoomID {
+			delete(a.pendingInvites, inviteID)
+			a.mu.Unlock()
+			return "", "Error: Inviter no longer in the room"
+		}
+
+		if invitee.RoomID != nil {
+			delete(a.pendingInvites, inviteID)
+			a.mu.Unlock()
+			return "", "Error: Invitee already in a room"
+		}
+
+		room, ok := a.rooms[pending.RoomID]
+		if !ok {
+			delete(a.pendingInvites, inviteID)
+			a.mu.Unlock()
+			return "", "Error: Room not found"
+		}
+
+		if room.OwnerID != "" && room.OwnerID != "host" && !contains(room.ApprovedUserIDs, inviteeID) {
+			room.ApprovedUserIDs = append(room.ApprovedUserIDs, inviteeID)
+		}
+
+		delete(a.pendingInvites, inviteID)
+		a.mu.Unlock()
+
+		_, err := a.JoinRoom(inviteeID, pending.RoomID)
+		if err != nil {
+			return "", err.Error()
+		}
+
+		return pending.RoomID, fmt.Sprintf("Room %s joined via invite", room.Name)
 	}
 
 	if inviter.RoomID != nil || invitee.RoomID != nil {

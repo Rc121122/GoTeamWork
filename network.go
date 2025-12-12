@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
 	"GOproject/clip_helper"
 )
+
+const defaultHTTPTimeout = 15 * time.Second
 
 // NetworkClient handles communication with the central server
 type NetworkClient struct {
@@ -26,7 +29,7 @@ func NewNetworkClient(serverURL string) *NetworkClient {
 	return &NetworkClient{
 		serverURL: serverURL,
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: 0, // rely on per-request contexts for timeouts
 		},
 		connected: false,
 	}
@@ -42,8 +45,15 @@ func (n *NetworkClient) ConnectToServer() error {
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// Try to ping the server
-		resp, err := n.httpClient.Get(n.serverURL + "/api/users")
+		req, err := http.NewRequest("GET", n.serverURL+"/api/users", nil)
+		if err != nil {
+			lastErr = err
+			break
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+		req = req.WithContext(ctx)
+		resp, err := n.httpClient.Do(req)
+		cancel()
 		if err != nil {
 			lastErr = err
 			if attempt < maxRetries {
@@ -91,11 +101,16 @@ func (n *NetworkClient) CreateUser(name string) (*User, error) {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	resp, err := n.httpClient.Post(
-		n.serverURL+"/api/users",
-		"application/json",
-		bytes.NewBuffer(jsonData),
-	)
+	req, err := http.NewRequest("POST", n.serverURL+"/api/users", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	resp, err := n.httpClient.Do(req)
 	if err != nil {
 		n.setDisconnected()
 		return nil, fmt.Errorf("failed to create user: %w", err)
@@ -131,11 +146,16 @@ func (n *NetworkClient) SendInvite(inviteeID, inviterID, message string) (string
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	resp, err := n.httpClient.Post(
-		n.serverURL+"/api/invite",
-		"application/json",
-		bytes.NewBuffer(jsonData),
-	)
+	req, err := http.NewRequest("POST", n.serverURL+"/api/invite", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	resp, err := n.httpClient.Do(req)
 	if err != nil {
 		n.setDisconnected()
 		return "", fmt.Errorf("failed to send invite: %w", err)
@@ -160,22 +180,28 @@ func (n *NetworkClient) SendInvite(inviteeID, inviterID, message string) (string
 }
 
 // UploadClipboardItem uploads a clipboard item to the server
+
 func (n *NetworkClient) UploadClipboardItem(item *clip_helper.ClipboardItem, userID, userName string) (*Operation, error) {
-	req := ClipboardUploadRequest{
+	payload := ClipboardUploadRequest{
 		Item:     *item,
 		UserID:   userID,
 		UserName: userName,
 	}
-	jsonData, err := json.Marshal(req)
+	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	resp, err := n.httpClient.Post(
-		n.serverURL+"/api/clipboard",
-		"application/json",
-		bytes.NewBuffer(jsonData),
-	)
+	httpReq, err := http.NewRequest("POST", n.serverURL+"/api/clipboard", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+	defer cancel()
+	httpReq = httpReq.WithContext(ctx)
+
+	resp, err := n.httpClient.Do(httpReq)
 	if err != nil {
 		n.setDisconnected()
 		return nil, fmt.Errorf("failed to upload clipboard item: %w", err)
@@ -196,14 +222,52 @@ func (n *NetworkClient) UploadClipboardItem(item *clip_helper.ClipboardItem, use
 
 // UploadZipData uploads zip data for a specific operation
 func (n *NetworkClient) UploadZipData(opID string, zipData []byte) error {
-	// Create a request with extended timeout for large file uploads
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/clipboard/%s/zip", n.serverURL, opID), bytes.NewBuffer(zipData))
+	return n.uploadFileData(opID, zipData, false, nil)
+}
+
+// UploadSingleFileData uploads a raw file instead of a zip for single-file shares
+func (n *NetworkClient) UploadSingleFileData(opID string, fileData []byte, name, mime string, size int64, thumb string) error {
+	meta := map[string]string{
+		"X-Clipboard-File-Name": name,
+		"X-Clipboard-File-Mime": mime,
+		"X-Clipboard-File-Size": strconv.FormatInt(size, 10),
+	}
+	if thumb != "" {
+		meta["X-Clipboard-File-Thumb"] = thumb
+	}
+	return n.uploadFileData(opID, fileData, true, meta)
+}
+
+func (n *NetworkClient) uploadFileData(opID string, data []byte, single bool, headers map[string]string) error {
+	endpoint := fmt.Sprintf("%s/api/clipboard/%s/zip", n.serverURL, opID)
+	if single {
+		endpoint += "?single=1"
+	}
+
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(data))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/zip")
 
-	// Use a longer timeout for zip uploads (30 minutes for very large files)
+	if single {
+		if headers == nil {
+			headers = make(map[string]string)
+		}
+		contentType := headers["X-Clipboard-File-Mime"]
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		req.Header.Set("Content-Type", contentType)
+	} else {
+		req.Header.Set("Content-Type", "application/zip")
+	}
+
+	for k, v := range headers {
+		if v != "" {
+			req.Header.Set(k, v)
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	req = req.WithContext(ctx)
@@ -211,7 +275,7 @@ func (n *NetworkClient) UploadZipData(opID string, zipData []byte) error {
 	resp, err := n.httpClient.Do(req)
 	if err != nil {
 		n.setDisconnected()
-		return fmt.Errorf("failed to upload zip data: %w", err)
+		return fmt.Errorf("failed to upload file data: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -231,7 +295,15 @@ func (n *NetworkClient) setDisconnected() {
 
 // Ping checks if the server is reachable
 func (n *NetworkClient) Ping() error {
-	resp, err := n.httpClient.Get(n.serverURL + "/api/users")
+	req, err := http.NewRequest("GET", n.serverURL+"/api/users", nil)
+	if err != nil {
+		return fmt.Errorf("failed to create ping request: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	resp, err := n.httpClient.Do(req)
 	if err != nil {
 		n.setDisconnected()
 		return fmt.Errorf("ping failed: %w", err)

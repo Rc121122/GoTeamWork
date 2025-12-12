@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -617,7 +618,33 @@ func (a *App) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	itemData, ok := targetOp.Item.Data.(*clip_helper.ClipboardItem)
-	if !ok || itemData.Type != clip_helper.ClipboardFile || len(itemData.ZipData) == 0 {
+	if !ok || itemData.Type != clip_helper.ClipboardFile {
+		http.Error(w, "No file data available", http.StatusNotFound)
+		return
+	}
+
+	if itemData.IsSingleFile {
+		if len(itemData.SingleFileData) == 0 {
+			http.Error(w, "No file data available", http.StatusNotFound)
+			return
+		}
+		filename := itemData.SingleFileName
+		if filename == "" {
+			filename = fmt.Sprintf("shared_file_%s", opID)
+		}
+		mimeType := itemData.SingleFileMime
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+
+		w.Header().Set("Content-Type", mimeType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(itemData.SingleFileData)))
+		w.Write(itemData.SingleFileData)
+		return
+	}
+
+	if len(itemData.ZipData) == 0 {
 		http.Error(w, "No file data available", http.StatusNotFound)
 		return
 	}
@@ -626,7 +653,6 @@ func (a *App) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"shared_files_%s.zip\"", opID))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(itemData.ZipData)))
-
 	w.Write(itemData.ZipData)
 }
 
@@ -724,11 +750,17 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("Received zip upload for op: %s\n", opID)
+	isSingle := r.URL.Query().Get("single") == "1"
+	fileName := r.Header.Get("X-Clipboard-File-Name")
+	fileMime := r.Header.Get("X-Clipboard-File-Mime")
+	fileThumb := r.Header.Get("X-Clipboard-File-Thumb")
+	fileSizeHeader := r.Header.Get("X-Clipboard-File-Size")
 
-	// Limit zip upload size to 1GB
-	const maxZipSize = 1 << 30 // 1GB
-	limitedReader := io.LimitReader(r.Body, maxZipSize+1) // +1 to detect if over limit
+	fmt.Printf("Received %s upload for op: %s\n", map[bool]string{true: "single file", false: "zip"}[isSingle], opID)
+
+	// Limit payload size to 10GB
+	const maxDataSize = 10 * 1024 * 1024 * 1024            // 10GB
+	limitedReader := io.LimitReader(r.Body, maxDataSize+1) // +1 to detect if over limit
 
 	zipData, err := io.ReadAll(limitedReader)
 	if err != nil {
@@ -737,9 +769,9 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(zipData) > maxZipSize {
-		fmt.Printf("Zip data size %d bytes exceeds limit of %d bytes\n", len(zipData), maxZipSize)
-		http.Error(w, "Zip file too large (max 1GB)", http.StatusRequestEntityTooLarge)
+	if len(zipData) > maxDataSize {
+		fmt.Printf("Upload size %d bytes exceeds limit of %d bytes\n", len(zipData), maxDataSize)
+		http.Error(w, "File too large (max 10GB)", http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -794,8 +826,37 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.mu.Lock()
-	itemData.ZipData = zipData
-	itemData.Text = fmt.Sprintf("%d files compressed (ready)", len(itemData.Files))
+	if isSingle {
+		if fileName == "" {
+			fileName = fmt.Sprintf("shared_file_%s", opID)
+		}
+		if fileMime == "" {
+			fileMime = "application/octet-stream"
+		}
+		itemData.IsSingleFile = true
+		itemData.SingleFileName = fileName
+		itemData.SingleFileMime = fileMime
+		if fileThumb != "" {
+			itemData.SingleFileThumb = fileThumb
+		}
+		if fileSizeHeader != "" {
+			if parsed, err := strconv.ParseInt(fileSizeHeader, 10, 64); err == nil {
+				itemData.SingleFileSize = parsed
+			} else {
+				itemData.SingleFileSize = int64(len(zipData))
+			}
+		} else {
+			itemData.SingleFileSize = int64(len(zipData))
+		}
+		itemData.SingleFileData = zipData
+		itemData.ZipData = nil
+		itemData.Text = fmt.Sprintf("%s (%s) ready", fileName, clip_helper.HumanFileSize(itemData.SingleFileSize))
+	} else {
+		itemData.ZipData = zipData
+		itemData.IsSingleFile = false
+		itemData.SingleFileData = nil
+		itemData.Text = fmt.Sprintf("%d files compressed (ready)", len(itemData.Files))
+	}
 	a.mu.Unlock()
 
 	fmt.Printf("Updated operation %s with zip data. Text: %s\n", opID, itemData.Text)

@@ -5,6 +5,11 @@ export namespace clip_helper {
 	    text?: string;
 	    image?: number[];
 	    files?: string[];
+	    isSingleFile?: boolean;
+	    singleFileName?: string;
+	    singleFileMime?: string;
+	    singleFileSize?: number;
+	    singleFileThumb?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ClipboardItem(source);
@@ -16,6 +21,11 @@ export namespace clip_helper {
 	        this.text = source["text"];
 	        this.image = source["image"];
 	        this.files = source["files"];
+	        this.isSingleFile = source["isSingleFile"];
+	        this.singleFileName = source["singleFileName"];
+	        this.singleFileMime = source["singleFileMime"];
+	        this.singleFileSize = source["singleFileSize"];
+	        this.singleFileThumb = source["singleFileThumb"];
 	    }
 	}
 

@@ -34,6 +34,8 @@ export interface InviteEventPayload {
   inviter: string;
   message: string;
   expiresAt: number;
+  roomId?: string;
+  roomName?: string;
 }
 
 export interface SSEEnvelope<T> {
@@ -86,6 +88,11 @@ export interface CopiedItem {
   text?: string;
   image?: string; // base64 encoded
   files?: string[]; // file paths
+  isSingleFile?: boolean;
+  singleFileName?: string;
+  singleFileMime?: string;
+  singleFileSize?: number;
+  singleFileThumb?: string;
 }
 
 export interface Operation {

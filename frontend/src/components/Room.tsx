@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { hostSendChatMessage, hostFetchChatHistory, hostLeaveRoom, hostFetchOperations } from '../api/wailsBridge';
-import { httpSendChatMessage, httpFetchChatHistory, httpLeaveRoom, httpFetchOperations, getApiBaseUrl } from '../api/httpClient';
-import { ChatMessage, Room, Operation, CopiedItem } from '../api/types';
+import { hostSendChatMessage, hostFetchChatHistory, hostLeaveRoom, hostFetchOperations, hostInviteUser } from '../api/wailsBridge';
+import { httpSendChatMessage, httpFetchChatHistory, httpLeaveRoom, httpFetchOperations, getApiBaseUrl, httpFetchUsers, httpInviteUser } from '../api/httpClient';
+import { ChatMessage, Room, Operation, CopiedItem, User } from '../api/types';
 import { addSSEListener, removeSSEListener } from '../sse';
 import { BrowserOpenURL } from '../../wailsjs/runtime/runtime';
 
@@ -16,6 +16,11 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteUsers, setInviteUsers] = useState<User[]>([]);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [invitedIds, setInvitedIds] = useState<Set<string>>(new Set());
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const refreshChat = async () => {
@@ -157,6 +162,26 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
       }
   };
 
+  const formatBytes = (bytes?: number) => {
+    if (!bytes) return '';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex++;
+    }
+    return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  };
+
+  const getFileThumb = (name?: string, fallback?: string) => {
+    if (!name && !fallback) return 'FILE';
+    const source = fallback || name || '';
+    const ext = source.includes('.') ? source.split('.').pop() : source;
+    const label = (ext || 'FILE').toUpperCase();
+    return label.slice(0, 4);
+  };
+
   const renderClipboardItem = (op: Operation) => {
       const item = op.item.data as CopiedItem;
       if (!item) {
@@ -184,7 +209,18 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
           }
       };
 
-      return (
+      const isSingleFile = item.type === 'file' && (item as any).isSingleFile;
+      const singleFileName = (item as any)?.singleFileName as string | undefined;
+      const singleFileSize = (item as any)?.singleFileSize as number | undefined;
+      const singleFileThumb = getFileThumb(singleFileName, (item as any)?.singleFileThumb as string | undefined);
+
+        const hasErrorText = item.text && (item.text.includes('too large') || item.text.includes('exceeds limit'));
+        const readyByText = item.text && item.text.includes('(ready)');
+        const readySingleFile = isSingleFile && typeof singleFileSize === 'number' && singleFileSize > 0;
+        const downloadReady = Boolean(readyByText || readySingleFile);
+        const downloadOpId = op.id || op.itemId;
+
+        return (
           <div key={op.id} className="clipboard-card" style={{
               background: 'rgba(255, 255, 255, 0.05)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -266,39 +302,55 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
                           />
                       </div>
                   )}
-                  {item.type === 'file' && item.files && (
+                    {item.type === 'file' && item.files && (
                       <div>
-                          <div style={{
-                              background: 'rgba(255, 255, 255, 0.03)',
-                              borderRadius: '8px',
-                              padding: '12px',
-                              marginBottom: '12px',
-                              border: '1px solid rgba(255, 255, 255, 0.08)'
-                          }}>
-                              <div style={{ fontWeight: '600', color: '#e2e8f0', marginBottom: '8px' }}>
-                                  📁 Files ({item.files.length})
-                              </div>
-                              <div style={{
-                                  maxHeight: '100px',
-                                  overflowY: 'auto',
-                                  fontSize: '0.85rem',
-                                  color: '#94a3b8'
-                              }}>
-                                  {item.files.map((file, idx) => (
-                                      <div key={idx} style={{
-                                          padding: '4px 0',
-                                          borderBottom: idx < item.files!.length - 1 ? '1px solid rgba(255, 255, 255, 0.08)' : 'none'
-                                      }}>
-                                          {file}
-                                      </div>
-                                  ))}
-                              </div>
+                        {isSingleFile ? (
+                        <div className="file-thumbnail-row">
+                          <div className="file-thumb-circle">
+                          {singleFileThumb}
                           </div>
+                          <div>
+                          <div className="file-thumb-name">{singleFileName}</div>
+                          {singleFileSize && (
+                            <div className="file-thumb-size">{formatBytes(singleFileSize)}</div>
+                          )}
+                          </div>
+                        </div>
+                        ) : (
+                        <div style={{
+                          background: 'rgba(255, 255, 255, 0.03)',
+                          borderRadius: '8px',
+                          padding: '12px',
+                          marginBottom: '12px',
+                          border: '1px solid rgba(255, 255, 255, 0.08)'
+                        }}>
+                          <div style={{ fontWeight: '600', color: '#e2e8f0', marginBottom: '8px' }}>
+                            📁 Files ({item.files.length})
+                          </div>
+                          <div style={{
+                            maxHeight: '100px',
+                            overflowY: 'auto',
+                            fontSize: '0.85rem',
+                            color: '#94a3b8'
+                          }}>
+                            {item.files.map((file, idx) => (
+                              <div key={idx} style={{
+                                padding: '4px 0',
+                                borderBottom: idx < item.files!.length - 1 ? '1px solid rgba(255, 255, 255, 0.08)' : 'none'
+                              }}>
+                                {file}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        )}
                           <div style={{ textAlign: 'center' }}>
-                              {item.text && item.text.includes('(ready)') ? (
+                          {downloadReady ? (
                                   <button
                                       onClick={() => {
-                                          BrowserOpenURL(`${getApiBaseUrl()}/api/download/${op.id}`);
+                                          if (downloadOpId) {
+                                            BrowserOpenURL(`${getApiBaseUrl()}/api/download/${downloadOpId}`);
+                                          }
                                       }}
                                       style={{
                                           padding: '8px 16px',
@@ -320,10 +372,10 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
                                           e.currentTarget.style.transform = 'translateY(0)';
                                           e.currentTarget.style.boxShadow = '0 2px 4px rgba(14, 165, 233, 0.3)';
                                       }}
-                                  >
-                                      📥 Download Files
-                                  </button>
-                              ) : item.text && (item.text.includes('too large') || item.text.includes('exceeds limit')) ? (
+                                    >
+                                      {isSingleFile ? `📥 Download ${singleFileThumb}` : '📥 Download Files'}
+                                    </button>
+                                  ) : hasErrorText ? (
                                   <div style={{
                                       display: 'inline-flex',
                                       alignItems: 'center',
@@ -338,7 +390,7 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
                                       ⚠️ {item.text}
                                   </div>
                               ) : (
-                                  <div style={{
+                                    <div style={{
                                       display: 'inline-flex',
                                       alignItems: 'center',
                                       gap: '8px',
@@ -356,7 +408,7 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
                                           borderRadius: '50%',
                                           animation: 'spin 1s linear infinite'
                                       }}></div>
-                                      Compressing files...
+                                      {isSingleFile ? 'Preparing single file...' : 'Compressing files...'}
                                   </div>
                               )}
                           </div>
@@ -379,6 +431,42 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
       );
   };
 
+  const openInviteModal = async () => {
+    setInviteOpen(true);
+    setInviteLoading(true);
+    setInviteError(null);
+    try {
+      const users = await httpFetchUsers();
+      // Only users not already in the current room (by membership list or their roomId)
+      const filtered = users.filter((u) => {
+        if (u.id === currentUser.id) return false;
+        if (currentRoom.userIds.includes(u.id)) return false;
+        if (u.roomId && u.roomId === currentRoom.id) return false;
+        return true;
+      });
+      setInviteUsers(filtered);
+    } catch (err) {
+      console.error('Failed to load users', err);
+      setInviteError('Failed to load users');
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const handleInvite = async (userId: string, userName: string) => {
+    try {
+      if (appMode === 'client') {
+        await httpInviteUser({ userId, inviterId: currentUser.id, message: `Join ${currentRoom.name}` });
+      } else {
+        await hostInviteUser(userId);
+      }
+      setInvitedIds((prev) => new Set(prev).add(userId));
+    } catch (err) {
+      console.error('Failed to invite user', err);
+      setInviteError('Failed to invite user');
+    }
+  };
+
   return (
     <div className="room-shell">
       {/* Chat */}
@@ -388,12 +476,22 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
             <p className="pill" style={{ display: 'inline-block', marginBottom: '4px' }}>Chat</p>
             <h3 style={{ margin: 0 }}>{currentRoom.name}</h3>
           </div>
-          <button className="secondary-btn" onClick={handleLeave}>Leave Room</button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="icon-btn" onClick={openInviteModal} title="Invite users">➕ Invite</button>
+            <button className="secondary-btn" onClick={handleLeave}>Leave Room</button>
+          </div>
         </div>
         <div className="chat-list">
           {messages.map(msg => (
-            <div key={msg.id} className="chat-bubble">
-              <strong>{msg.userId === currentUser.id ? 'Me' : msg.userName}:</strong> {msg.message}
+            <div key={msg.id} className={`chat-bubble ${msg.userId === currentUser.id ? 'chat-bubble-me' : 'chat-bubble-other'}`}>
+              {msg.userId === currentUser.id ? (
+                <div className="chat-message">{msg.message}</div>
+              ) : (
+                <div>
+                  <div className="chat-sender">{msg.userName}</div>
+                  <div className="chat-message">{msg.message}</div>
+                </div>
+              )}
             </div>
           ))}
           <div ref={chatEndRef} />
@@ -463,9 +561,9 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
         </div>
         <div className="clipboard-list" style={{
           padding: '20px',
-          maxHeight: 'calc(100vh - 300px)',
-          overflowY: 'auto',
-          background: 'rgba(255, 255, 255, 0.01)'
+          background: 'rgba(255, 255, 255, 0.01)',
+          flex: 1,
+          minHeight: 0
         }}>
           {operations.length === 0 ? (
              <div style={{
@@ -491,6 +589,69 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
           ) : (
               operations.slice().reverse().map(renderClipboardItem)
           )}
+        </div>
+      </div>
+      <InviteModal
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        users={inviteUsers}
+        loading={inviteLoading}
+        error={inviteError}
+        invitedIds={invitedIds}
+        currentRoomId={currentRoom.id}
+        currentRoomUserIds={currentRoom.userIds}
+        onInvite={handleInvite}
+      />
+    </div>
+  );
+};
+
+const InviteModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  users: User[];
+  loading: boolean;
+  error: string | null;
+  invitedIds: Set<string>;
+  currentRoomId: string;
+  currentRoomUserIds: string[];
+  onInvite: (id: string, name: string) => void;
+}> = ({ open, onClose, users, loading, error, invitedIds, currentRoomId, currentRoomUserIds, onInvite }) => {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" style={{ zIndex: 2000 }}>
+      <div className="modal-card" style={{ maxWidth: '520px', width: '520px' }}>
+        <div className="modal-head">
+          <h3 style={{ margin: 0 }}>Invite Users</h3>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div style={{ marginBottom: '12px', color: '#94a3b8', fontSize: '0.9rem' }}>
+          Select a user to invite to this room.
+        </div>
+        {loading && <div className="muted">Loading users...</div>}
+        {error && <div style={{ color: '#fca5a5', marginBottom: '8px' }}>{error}</div>}
+        {!loading && users.length === 0 && <div className="muted">No available users to invite.</div>}
+        <div className="invite-list">
+          {users.map((u) => {
+            const invited = invitedIds.has(u.id);
+            const inRoom = u.roomId === currentRoomId || currentRoomUserIds.includes(u.id);
+            return (
+              <div key={u.id} className="invite-row">
+                <div>
+                  <div className="invite-name">{u.name}</div>
+                  <div className="invite-sub">{u.isOnline ? 'Online' : 'Offline'}</div>
+                </div>
+                <button
+                  className="primary-btn"
+                  style={{ padding: '8px 12px', minWidth: '90px', opacity: invited || inRoom ? 0.6 : 1 }}
+                  disabled={invited || inRoom}
+                  onClick={() => onInvite(u.id, u.name)}
+                >
+                  {inRoom ? 'In room' : invited ? 'Invited' : 'Invite'}
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

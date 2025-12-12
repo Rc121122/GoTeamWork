@@ -20,10 +20,16 @@ type ClipboardItem struct {
 	Image   []byte            `json:"image,omitempty"` // PNG encoded
 	ZipData []byte            `json:"-"`               // Zip file content
 	Files   []string          `json:"files,omitempty"` // File paths
+
+	IsSingleFile    bool   `json:"isSingleFile,omitempty"`
+	SingleFileName  string `json:"singleFileName,omitempty"`
+	SingleFileMime  string `json:"singleFileMime,omitempty"`
+	SingleFileSize  int64  `json:"singleFileSize,omitempty"`
+	SingleFileThumb string `json:"singleFileThumb,omitempty"`
+	SingleFileData  []byte `json:"-"` // raw bytes for direct download
 }
 
 const (
 	ClipboardShareCooldown = 250 * time.Millisecond
 	ClipboardCacheTTL      = 8 * time.Second
 )
-

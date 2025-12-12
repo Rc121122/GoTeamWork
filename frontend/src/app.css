@@ -188,12 +188,16 @@ body {
     display: flex;
     flex: 1;
     overflow: hidden;
+    min-height: 0;
 }
 
 .main-area {
     flex: 1;
     padding: 0;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
 /* Sidebar */
@@ -299,10 +303,26 @@ body {
 /* Room */
 .room-shell {
     display: grid;
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 12px;
-    height: 100%;
-    padding: 12px;
+    grid-template-columns: minmax(360px, 1fr) minmax(360px, 1fr);
+    gap: 16px;
+    padding: 16px;
+    width: 100%;
+    height: calc(100vh - 90px);
+    max-height: calc(100vh - 90px);
+    box-sizing: border-box;
+    align-items: stretch;
+    overflow: hidden;
+    min-height: 0;
+    flex: 1;
+}
+
+@media (max-width: 900px) {
+    .room-shell {
+        grid-template-columns: 1fr;
+        height: auto;
+        max-height: none;
+        overflow: visible;
+    }
 }
 
 .panel {
@@ -314,6 +334,9 @@ body {
     flex-direction: column;
     gap: 10px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
 }
 
 .panel-header {
@@ -329,14 +352,96 @@ body {
     border-radius: 10px;
     padding: 10px;
     border: 1px solid var(--card-border);
+    min-height: 0;
 }
 
 .chat-bubble {
-    margin-bottom: 8px;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
 }
 
-.chat-bubble strong {
-    color: var(--accent);
+.chat-bubble-me {
+    align-items: flex-end;
+}
+
+.chat-bubble-other {
+    align-items: flex-start;
+}
+
+.chat-sender {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    font-weight: 600;
+    text-align: left;
+}
+
+.chat-message {
+    padding: 10px 14px;
+    border-radius: 18px;
+    max-width: 70%;
+    word-wrap: break-word;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    text-align: left;
+}
+
+.chat-bubble-me .chat-message {
+    background: #1e293b;
+    color: #e2e8f0;
+    border-bottom-right-radius: 4px;
+}
+
+.chat-bubble-other .chat-message {
+    background: #0ea5e9;
+    color: #ffffff;
+    border-bottom-left-radius: 4px;
+}
+
+.icon-btn {
+    padding: 8px 12px;
+    background: rgba(14, 165, 233, 0.12);
+    border: 1px solid rgba(14, 165, 233, 0.3);
+    color: #38bdf8;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 700;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.icon-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(14, 165, 233, 0.25);
+}
+
+.invite-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 360px;
+    overflow-y: auto;
+    margin-top: 10px;
+}
+
+.invite-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.invite-name {
+    color: #e2e8f0;
+    font-weight: 600;
+}
+
+.invite-sub {
+    color: var(--text-muted);
+    font-size: 0.85rem;
 }
 
 .chat-input {
@@ -352,7 +457,9 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    flex: 1;
     overflow-y: auto;
+    min-height: 0;
 }
 
 .clipboard-card {
@@ -360,6 +467,44 @@ body {
     border: 1px solid var(--card-border);
     border-radius: 12px;
     padding: 10px;
+    width: 100%;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.file-thumbnail-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+}
+
+.file-thumb-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: 0.05em;
+}
+
+.file-thumb-name {
+    font-weight: 600;
+    color: #e2e8f0;
+}
+
+.file-thumb-size {
+    font-size: 0.8rem;
+    color: #94a3b8;
+    margin-top: 2px;
 }
 
 .badge {

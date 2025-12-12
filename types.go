@@ -150,6 +150,7 @@ type PendingInvite struct {
 	InviterID string    `json:"inviterId"`
 	InviteeID string    `json:"inviteeId"`
 	Message   string    `json:"message"`
+	RoomID    string    `json:"roomId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
