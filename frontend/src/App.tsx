@@ -44,8 +44,11 @@ function App() {
     WindowUnmaximise();
     WindowSetSize(HUD_WINDOW_WIDTH, HUD_WINDOW_HEIGHT);
     WindowSetPosition(targetX, targetY);
-    WindowSetAlwaysOnTop(true);
     WindowShow();
+    //delay here
+    setTimeout(() => {
+      WindowSetAlwaysOnTop(true);
+    }, 100);
   };
 
   // Timer effect

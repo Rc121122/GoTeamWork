@@ -10,7 +10,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onReboot, onSettings, onAbout }) => {
   return (
     <nav className="sidebar">
       <div className="logo">GTW</div>
-      <button onClick={onReboot} title="Reboot">↻</button>
+      <button onClick={onReboot} title="Reboot" style={{ color: 'red' }}>↻</button>
       <button onClick={onSettings} title="Settings">⚙</button>
       <button onClick={onAbout} title="About">ℹ</button>
     </nav>

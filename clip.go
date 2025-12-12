@@ -419,17 +419,25 @@ func startWindowsFilePoller(ctx context.Context, cb func(*clip_helper.ClipboardI
 }
 
 func handleClipboardChange(cb func(*clip_helper.ClipboardItem, int, int)) {
-	// Give a small delay to ensure clipboard is ready
-	time.Sleep(100 * time.Millisecond)
-
-	item, err := clip_helper.ReadClipboard()
-	if err != nil {
-		fmt.Printf("Warning: failed to read clipboard after change: %v\n", err)
-		return
-	}
-
 	x, y := getMousePosition()
-	cb(item, x, y)
+
+	// Emit HUD immediately for faster response
+	// Note: This assumes cb is a.prepareClipboardShare which emits the event
+	cb(nil, x, y)
+
+	// Then asynchronously read clipboard after delay
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+
+		item, err := clip_helper.ReadClipboard()
+		if err != nil {
+			fmt.Printf("Warning: failed to read clipboard after change: %v\n", err)
+			return
+		}
+
+		// Update cache with actual item
+		cb(item, x, y)
+	}()
 }
 
 func (a *App) ensureAccessibilityPermission() bool {
@@ -460,8 +468,13 @@ func (a *App) ensureAccessibilityPermission() bool {
 }
 
 func (a *App) prepareClipboardShare(item *clip_helper.ClipboardItem, screenX, screenY int) {
-	a.cacheClipboardItem(item)
-	a.emitClipboardButtonEvent(screenX, screenY)
+	if item == nil {
+		// Emit HUD immediately for faster response
+		a.emitClipboardButtonEvent(screenX, screenY)
+	} else {
+		// Cache the actual clipboard item
+		a.cacheClipboardItem(item)
+	}
 }
 
 func (a *App) cacheClipboardItem(item *clip_helper.ClipboardItem) {
