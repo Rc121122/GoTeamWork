@@ -30,15 +30,17 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 30, G: 41, B: 59, A: 255}, // Solid dark blue background
+		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0}, // Transparent background
 		Frameless:        true,
 		Mac: &mac.Options{
-			WebviewIsTransparent: false,
+			WebviewIsTransparent: true,
 			WindowIsTranslucent:  false,
 			TitleBar:             mac.TitleBarHiddenInset(),
 		},
 		Windows: &windows.Options{
-			WebviewIsTransparent: false,
+			WebviewIsTransparent: true,
+			WindowIsTranslucent:  false,
+
 		},
 		OnStartup: app.startup,
 		Bind: []interface{}{

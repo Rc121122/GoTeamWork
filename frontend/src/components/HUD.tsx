@@ -10,6 +10,14 @@ interface HUDProps {
 const HUD: React.FC<HUDProps> = ({ onClose }) => {
   const [state, setState] = React.useState<'idle' | 'carry'>('idle');
 
+  // Set body background to transparent when HUD mounts
+  React.useEffect(() => {
+    document.body.style.background = 'transparent';
+    return () => {
+      document.body.style.background = ''; // Reset on unmount
+    };
+  }, []);
+
   // Auto-hide after 5 seconds
   React.useEffect(() => {
     const timer = setTimeout(() => {
@@ -37,35 +45,24 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
 
   return (
     <div style={{ 
-        position: 'fixed',
-        inset: 0,
-        width: '100%', 
-        height: '100%', 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        pointerEvents: 'auto',
-        background: '#1e293b', // Solid dark background - no transparency
-        zIndex: 9999,
-        WebkitAppRegion: 'drag', // Allow dragging
+      position: 'fixed',
+      inset: 0,
+      width: '100%', 
+      height: '100%', 
+      display: 'flex', 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      pointerEvents: 'auto',
+      background: 'transparent',
+      zIndex: 9999,
+      // WebkitAppRegion: 'drag', // Allow dragging
     }}>
-      <div style={{
-        width: '140px',
-        height: '140px',
-        borderRadius: '16px',
-        background: 'linear-gradient(135deg, #334155 0%, #1e293b 100%)',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-      }}>
-        <img 
-          src={state === 'idle' ? gopherIdle : gopherCarry} 
-          alt="Gopher" 
-          style={{ width: '100px', cursor: 'pointer', WebkitAppRegion: 'no-drag' } as React.CSSProperties} 
-          onClick={handleClick}
-        />
-      </div>
+      <img 
+      src={state === 'idle' ? gopherIdle : gopherCarry} 
+      alt="Gopher" 
+      style={{ width: '40px', cursor: 'pointer', marginLeft: '100px', WebkitAppRegion: 'no-drag', opacity: 0.9 } as React.CSSProperties} 
+      onClick={handleClick}
+      />
     </div>
   );
 };

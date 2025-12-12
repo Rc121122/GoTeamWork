@@ -8,19 +8,19 @@ const TitleBar: React.FC = () => {
       <div className="title-bar-controls">
         <button 
           onClick={WindowMinimise}
-          style={{ background: 'transparent', border: 'none', color: '#bdc3c7', cursor: 'pointer' }}
+          style={{ background: 'transparent', border: 'none', color: '#bdc3c7', cursor: 'pointer', marginBottom: '2px' }}
         >
           _
         </button>
         <button 
           onClick={WindowToggleMaximise}
-          style={{ background: 'transparent', border: 'none', color: '#bdc3c7', cursor: 'pointer' }}
+          style={{ background: 'transparent', border: 'none', color: '#bdc3c7', cursor: 'pointer', marginTop: '2px'}}
         >
           □
         </button>
         <button 
           onClick={Quit}
-          style={{ background: 'transparent', border: 'none', color: '#e74c3c', cursor: 'pointer' }}
+          style={{ background: 'transparent', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: '1.2em' }}
         >
           ✕
         </button>
