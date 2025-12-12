@@ -169,7 +169,7 @@ func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardI
 	}
 
 	// Broadcast update - important: send updated operation with ZIP data
-	ops := a.historyPool.GetOperations(roomID, "")
+	ops := a.historyPool.GetOperations(roomID, "", "")
 	var targetOp *Operation
 	for _, op := range ops {
 		if op.ItemID == itemID {

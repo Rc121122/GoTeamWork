@@ -180,7 +180,7 @@ func TestSSERouteReconnectHistory(t *testing.T) {
 			Timestamp: time.Now().Unix(),
 		},
 	}
-	op1 := history.AddOperation(roomID, OpAdd, itemOne.ID, itemOne)
+	op1 := history.AddOperation(roomID, OpAdd, itemOne.ID, itemOne, "", "")
 
 	itemTwo := &Item{
 		ID:   "msg_2",
@@ -194,13 +194,13 @@ func TestSSERouteReconnectHistory(t *testing.T) {
 			Timestamp: time.Now().Unix(),
 		},
 	}
-	op2 := history.AddOperation(roomID, OpAdd, itemTwo.ID, itemTwo)
+	op2 := history.AddOperation(roomID, OpAdd, itemTwo.ID, itemTwo, "", "")
 
-	if ops := history.GetOperations(roomID, ""); len(ops) != 2 {
+	if ops := history.GetOperations(roomID, "", ""); len(ops) != 2 {
 		t.Fatalf("expected 2 operations for full sync, got %d", len(ops))
 	}
 
-	opsSince := history.GetOperations(roomID, op1.ID)
+	opsSince := history.GetOperations(roomID, op1.ID, "")
 	if len(opsSince) != 1 {
 		t.Fatalf("expected 1 operation since op1, got %d", len(opsSince))
 	}
@@ -208,7 +208,7 @@ func TestSSERouteReconnectHistory(t *testing.T) {
 		t.Fatalf("expected next op to be %s, got %s", op2.ID, opsSince[0].ID)
 	}
 
-	if ops := history.GetOperations(roomID, "missing"); len(ops) != 0 {
+	if ops := history.GetOperations(roomID, "missing", ""); len(ops) != 0 {
 		t.Fatalf("expected empty result for unknown hash, got %d", len(ops))
 	}
 }

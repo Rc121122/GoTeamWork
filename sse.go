@@ -12,19 +12,19 @@ import (
 type SSEEventType string
 
 const (
-	EventConnected       SSEEventType = "connected"
-	EventUserCreated     SSEEventType = "user_created"
-	EventUserLeft        SSEEventType = "user_left"
-	EventRoomCreated     SSEEventType = "room_created"
-	EventRoomDeleted     SSEEventType = "room_deleted"
-	EventUserInvited     SSEEventType = "user_invited"
-	EventUserJoined      SSEEventType = "user_joined"
-	EventChatMessage     SSEEventType = "chat_message"
-	EventHeartbeat       SSEEventType = "heartbeat"
-	EventClipboardCopied SSEEventType = "clipboard_copied"
+	EventConnected        SSEEventType = "connected"
+	EventUserCreated      SSEEventType = "user_created"
+	EventUserLeft         SSEEventType = "user_left"
+	EventRoomCreated      SSEEventType = "room_created"
+	EventRoomDeleted      SSEEventType = "room_deleted"
+	EventUserInvited      SSEEventType = "user_invited"
+	EventUserJoined       SSEEventType = "user_joined"
+	EventChatMessage      SSEEventType = "chat_message"
+	EventHeartbeat        SSEEventType = "heartbeat"
+	EventClipboardCopied  SSEEventType = "clipboard_copied"
 	EventClipboardUpdated SSEEventType = "clipboard_updated"
-	EventUserOffline     SSEEventType = "user_offline"
-	EventJoinRequest     SSEEventType = "join_request"
+	EventUserOffline      SSEEventType = "user_offline"
+	EventJoinRequest      SSEEventType = "join_request"
 )
 
 // SSEEvent represents a server-sent event
@@ -73,7 +73,7 @@ func (sm *SSEManager) AddClient(userID string, w http.ResponseWriter, flusher ht
 func (sm *SSEManager) RemoveClient(client *SSEClient) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	
+
 	if current, ok := sm.clients[client.UserID]; ok && current == client {
 		delete(sm.clients, client.UserID)
 	}
@@ -201,6 +201,18 @@ func (a *App) handleSSE(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("userId")
 	if userID == "" {
 		http.Error(w, "userId required", http.StatusBadRequest)
+		return
+	}
+
+	token := r.URL.Query().Get("token")
+	authUser, err := a.authenticateToken(token)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if _, err := enforceUserMatch(userID, authUser); err != nil {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 

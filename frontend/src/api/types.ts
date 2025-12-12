@@ -46,6 +46,11 @@ export interface CreateUserRequest {
   name: string;
 }
 
+export interface CreateUserResponse {
+  user: User;
+  token: string;
+}
+
 export interface InviteUserRequest {
   userId: string;
   inviterId: string;

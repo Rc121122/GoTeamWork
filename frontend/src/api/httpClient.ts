@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   ChatMessageRequest,
   CreateUserRequest,
+  CreateUserResponse,
   InviteUserRequest,
   JoinRoomRequest,
   LeaveRoomRequest,
@@ -13,6 +14,7 @@ import type {
 } from "./types";
 
 let API_BASE_URL = "http://localhost:8080";
+let authToken: string | null = null;
 
 /**
  * Parse and normalize server URL for different connection types:
@@ -56,6 +58,32 @@ export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
 
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
+export function setAuthToken(token: string | null) {
+  authToken = token;
+  if (typeof localStorage !== "undefined") {
+    if (token) {
+      localStorage.setItem("authToken", token);
+    } else {
+      localStorage.removeItem("authToken");
+    }
+  }
+}
+
+function loadAuthTokenFromStorage() {
+  if (typeof localStorage === "undefined") return;
+  const stored = localStorage.getItem("authToken");
+  if (stored) {
+    authToken = stored;
+  }
+}
+
+// Initialize auth token from storage on module load (browser context)
+loadAuthTokenFromStorage();
+
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -65,9 +93,15 @@ export class HttpError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const baseHeaders: HeadersInit = {
+    "Content-Type": "application/json",
+    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+  };
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
-      "Content-Type": "application/json",
+      ...baseHeaders,
+      ...(init.headers || {}),
     },
     ...init,
   });
@@ -83,11 +117,13 @@ export async function httpFetchUsers(): Promise<User[]> {
   return request<User[]>("/api/users");
 }
 
-export async function httpCreateUser(payload: CreateUserRequest): Promise<User> {
-  return request<User>("/api/users", {
+export async function httpCreateUser(payload: CreateUserRequest): Promise<CreateUserResponse> {
+  const resp = await request<CreateUserResponse>("/api/users", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  setAuthToken(resp.token);
+  return resp;
 }
 
 export async function httpInviteUser(payload: InviteUserRequest): Promise<ApiMessageResponse> {

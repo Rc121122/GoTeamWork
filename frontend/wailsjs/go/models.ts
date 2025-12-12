@@ -64,6 +64,8 @@ export namespace main {
 	export class Operation {
 	    id: string;
 	    parentId: string;
+	    parentHash?: string;
+	    hash: string;
 	    opType: string;
 	    itemId: string;
 	    item?: Item;
@@ -79,6 +81,8 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.parentId = source["parentId"];
+	        this.parentHash = source["parentHash"];
+	        this.hash = source["hash"];
 	        this.opType = source["opType"];
 	        this.itemId = source["itemId"];
 	        this.item = this.convertValues(source["item"], Item);

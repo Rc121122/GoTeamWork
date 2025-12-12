@@ -1,5 +1,5 @@
 import { globalState } from "./state";
-import { getApiBaseUrl } from "./api/httpClient";
+import { getApiBaseUrl, getAuthToken } from "./api/httpClient";
 import type {
   ChatMessage,
   CopiedItem,
@@ -47,14 +47,20 @@ function parseEnvelope<T>(event: MessageEvent<string>): T {
   return parsed.data;
 }
 
-export function connectSSE(userId: string): void {
+export function connectSSE(userId: string, token?: string): void {
   // If already connected, close existing? Or just return?
   // For now, let's close existing to be safe if userId changes
   if (globalState.sseConnection) {
       globalState.sseConnection.close();
   }
 
-  const url = `${getApiBaseUrl()}/api/sse?userId=${encodeURIComponent(userId)}`;
+  const resolvedToken = token || getAuthToken();
+  if (!resolvedToken) {
+    console.warn("SSE connect aborted: missing auth token");
+    return;
+  }
+
+  const url = `${getApiBaseUrl()}/api/sse?userId=${encodeURIComponent(userId)}&token=${encodeURIComponent(resolvedToken)}`;
 
   const setup = (): void => {
     const source = new EventSource(url);

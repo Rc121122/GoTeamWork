@@ -7,7 +7,7 @@ export function AcceptInvite(arg1:string,arg2:string):Promise<string|string>;
 
 export function ApproveJoinRequest(arg1:string,arg2:string,arg3:string):Promise<void>;
 
-export function CreateRoom(arg1:string):Promise<main.Room>;
+export function CreateRoom(arg1:string,arg2:string):Promise<main.Room>;
 
 export function CreateUser(arg1:string):Promise<main.User>;
 
@@ -23,7 +23,7 @@ export function GetCurrentRoom():Promise<main.Room>;
 
 export function GetMode():Promise<string>;
 
-export function GetOperations(arg1:string,arg2:string):Promise<Array<main.Operation>>;
+export function GetOperations(arg1:string,arg2:string,arg3:string):Promise<Array<main.Operation>>;
 
 export function Greet(arg1:string):Promise<string>;
 

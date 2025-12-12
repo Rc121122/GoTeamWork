@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"testing"
+
+	"GOproject/clip_helper"
 )
 
 func TestHistoryPoolChatAndClipboard(t *testing.T) {
@@ -10,10 +12,10 @@ func TestHistoryPoolChatAndClipboard(t *testing.T) {
 	roomID := "room-hist"
 
 	chat := &ChatMessage{ID: "chat_1", RoomID: roomID, UserID: "user_1", UserName: "Alice", Message: "hi", Timestamp: 1}
-	hp.AddOperation(roomID, OpAdd, chat.ID, &Item{ID: chat.ID, Type: ItemChat, Data: chat})
+	hp.AddOperation(roomID, OpAdd, chat.ID, &Item{ID: chat.ID, Type: ItemChat, Data: chat}, "", "")
 
-	clipboard := &ClipboardItem{Type: ClipboardText, Text: "copy"}
-	hp.AddOperation(roomID, OpAdd, "clip_1", &Item{ID: "clip_1", Type: ItemClipboard, Data: clipboard})
+	clipboard := &clip_helper.ClipboardItem{Type: clip_helper.ClipboardText, Text: "copy"}
+	hp.AddOperation(roomID, OpAdd, "clip_1", &Item{ID: "clip_1", Type: ItemClipboard, Data: clipboard}, "", "")
 
 	msgs := hp.GetCurrentChatMessages(roomID)
 	if len(msgs) != 1 || msgs[0].ID != chat.ID {
@@ -25,7 +27,7 @@ func TestHistoryPoolChatAndClipboard(t *testing.T) {
 		t.Fatalf("expected clipboard item to be returned, got %#v", items)
 	}
 
-	hp.AddOperation(roomID, OpRemove, chat.ID, &Item{ID: chat.ID, Type: ItemChat})
+	hp.AddOperation(roomID, OpRemove, chat.ID, &Item{ID: chat.ID, Type: ItemChat}, "", "")
 	msgs = hp.GetCurrentChatMessages(roomID)
 	if len(msgs) != 0 {
 		t.Fatalf("expected chat removal to be reflected, got %#v", msgs)
@@ -39,10 +41,10 @@ func TestHistoryPoolEnforceLimits(t *testing.T) {
 	for i := 0; i < maxOperationsPerRoom+10; i++ {
 		id := fmt.Sprintf("msg_%d", i)
 		msg := &ChatMessage{ID: id, RoomID: roomID, UserID: "user", UserName: "User", Message: id, Timestamp: int64(i)}
-		hp.AddOperation(roomID, OpAdd, id, &Item{ID: id, Type: ItemChat, Data: msg})
+		hp.AddOperation(roomID, OpAdd, id, &Item{ID: id, Type: ItemChat, Data: msg}, "", "")
 	}
 
-	ops := hp.GetOperations(roomID, "")
+	ops := hp.GetOperations(roomID, "", "")
 	if len(ops) != maxOperationsPerRoom {
 		t.Fatalf("expected history trimmed to %d ops, got %d", maxOperationsPerRoom, len(ops))
 	}

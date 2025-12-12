@@ -67,14 +67,22 @@ type Item struct {
 
 // Operation represents a git-style operation on the history
 type Operation struct {
-	ID        string        `json:"id"`
-	ParentID  string        `json:"parentId"`
-	OpType    OperationType `json:"opType"`
-	ItemID    string        `json:"itemId"`
-	Item      *Item         `json:"item,omitempty"`
-	Timestamp int64         `json:"timestamp"`
-	UserID    string        `json:"userId,omitempty"`
-	UserName  string        `json:"userName,omitempty"`
+	ID         string        `json:"id"`
+	ParentID   string        `json:"parentId"`
+	ParentHash string        `json:"parentHash,omitempty"`
+	Hash       string        `json:"hash"`
+	OpType     OperationType `json:"opType"`
+	ItemID     string        `json:"itemId"`
+	Item       *Item         `json:"item,omitempty"`
+	Timestamp  int64         `json:"timestamp"`
+	UserID     string        `json:"userId,omitempty"`
+	UserName   string        `json:"userName,omitempty"`
+}
+
+// CreateUserResponse bundles a user with an auth token for client use.
+type CreateUserResponse struct {
+	User  *User  `json:"user"`
+	Token string `json:"token"`
 }
 
 // HistoryPool manages operations for all rooms

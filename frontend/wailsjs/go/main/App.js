@@ -10,8 +10,8 @@ export function ApproveJoinRequest(arg1, arg2, arg3) {
   return window['go']['main']['App']['ApproveJoinRequest'](arg1, arg2, arg3);
 }
 
-export function CreateRoom(arg1) {
-  return window['go']['main']['App']['CreateRoom'](arg1);
+export function CreateRoom(arg1, arg2) {
+  return window['go']['main']['App']['CreateRoom'](arg1, arg2);
 }
 
 export function CreateUser(arg1) {
@@ -42,8 +42,8 @@ export function GetMode() {
   return window['go']['main']['App']['GetMode']();
 }
 
-export function GetOperations(arg1, arg2) {
-  return window['go']['main']['App']['GetOperations'](arg1, arg2);
+export function GetOperations(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetOperations'](arg1, arg2, arg3);
 }
 
 export function Greet(arg1) {

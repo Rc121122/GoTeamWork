@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { hostCreateUser, hostSetUser, hostSetServerURL } from '../api/wailsBridge';
-import { httpCreateUser, setApiBaseUrl, parseServerUrl } from '../api/httpClient';
+import { httpCreateUser, setApiBaseUrl, parseServerUrl, setAuthToken } from '../api/httpClient';
 
 interface NewUserPageProps {
-  onUserCreated: (user: { id: string; name: string }) => void;
+  onUserCreated: (user: { id: string; name: string; token?: string }) => void;
   appMode: 'host' | 'client';
 }
 
@@ -24,18 +24,20 @@ const NewUserPage: React.FC<NewUserPageProps> = ({ onUserCreated, appMode }) => 
     setConnecting(true);
 
     try {
-      let user: { id: string; name: string };
+      let user: { id: string; name: string; token?: string };
       
       if (appMode === 'client') {
         // Parse and set server URL for both frontend HTTP client and backend network client
         const serverUrl = parseServerUrl(serverAddress);
         console.log('Connecting to server:', serverUrl);
         
-        setApiBaseUrl(serverAddress); // Frontend HTTP client
+        setApiBaseUrl(serverUrl); // Frontend HTTP client
         await hostSetServerURL(serverUrl); // Backend network client
         
         // Create user on remote Host server
-        user = await httpCreateUser({ name: username });
+        const resp = await httpCreateUser({ name: username });
+        setAuthToken(resp.token);
+        user = { ...resp.user, token: resp.token };
         // Sync user to local Wails backend
         await hostSetUser(user.id, user.name);
       } else {

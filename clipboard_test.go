@@ -20,7 +20,7 @@ func TestHandleClipboardCopySanitizesAndBroadcasts(t *testing.T) {
 		t.Fatalf("expected sanitized clipboard text 'Shared', got %q", payload.Text)
 	}
 
-	ops := app.historyPool.GetOperations("global", "")
+	ops := app.historyPool.GetOperations("global", "", "")
 	if len(ops) != 1 {
 		t.Fatalf("expected clipboard history stored in global room, got %d operations", len(ops))
 	}

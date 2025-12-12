@@ -185,7 +185,7 @@ func TestHandleInviteJoinChatLeaveFlow(t *testing.T) {
 		t.Fatalf("expected persisted chat history, got %#v", history)
 	}
 
-	ops := app.historyPool.GetOperations(roomID, "")
+	ops := app.historyPool.GetOperations(roomID, "", "")
 	if len(ops) == 0 {
 		t.Fatalf("expected at least one operation after chat")
 	}

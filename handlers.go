@@ -23,6 +23,10 @@ func (a *App) handleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "GET" {
+		if _, err := a.authenticateRequest(r); err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 		users := a.ListAllUsers()
 		json.NewEncoder(w).Encode(users)
 		return
@@ -58,8 +62,14 @@ func (a *App) handleUsers(w http.ResponseWriter, r *http.Request) {
 		a.mu.RUnlock()
 
 		user := a.CreateUser(sanitizedName)
+		token, err := a.issueToken(user.ID)
+		if err != nil {
+			http.Error(w, "Failed to issue token", http.StatusInternalServerError)
+			return
+		}
+
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(user)
+		json.NewEncoder(w).Encode(CreateUserResponse{User: user, Token: token})
 		return
 	}
 
@@ -82,11 +92,22 @@ func (a *App) handleUserByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authUser, err := a.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Extract user ID from URL path
 	path := r.URL.Path
 	userID := ""
 	if len(path) > len("/api/users/") {
 		userID = path[len("/api/users/"):]
+	}
+
+	if _, err := enforceUserMatch(userID, authUser); err != nil {
+		http.Error(w, "Forbidden: userId does not match token", http.StatusForbidden)
+		return
 	}
 
 	if userID == "" {
@@ -117,6 +138,12 @@ func (a *App) handleRooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authUser, err := a.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	if r.Method == "GET" {
 		rooms := a.GetAllRooms()
 		json.NewEncoder(w).Encode(rooms)
@@ -141,7 +168,7 @@ func (a *App) handleRooms(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		room := a.CreateRoom(roomName)
+		room := a.CreateRoom(roomName, authUser.ID)
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(room)
 		return
@@ -166,6 +193,12 @@ func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authUser, err := a.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req InviteUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -176,6 +209,13 @@ func (a *App) handleInvite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "userId and inviterId are required", http.StatusBadRequest)
 		return
 	}
+
+	inviterID, err := enforceUserMatch(req.InviterID, authUser)
+	if err != nil {
+		http.Error(w, "Forbidden: userId does not match token", http.StatusForbidden)
+		return
+	}
+	req.InviterID = inviterID
 
 	inviteID, result, expiresAt := a.InviteWithRoom(req.UserID, req.InviterID, req.Message)
 	response := APIResponse{Message: result, InviteID: inviteID, ExpiresAt: expiresAt}
@@ -198,6 +238,12 @@ func (a *App) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authUser, err := a.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req AcceptInviteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -208,6 +254,13 @@ func (a *App) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "inviteId and inviteeId are required", http.StatusBadRequest)
 		return
 	}
+
+	inviteeID, err := enforceUserMatch(req.InviteeID, authUser)
+	if err != nil {
+		http.Error(w, "Forbidden: userId does not match token", http.StatusForbidden)
+		return
+	}
+	req.InviteeID = inviteeID
 
 	roomID, result := a.AcceptInvite(req.InviteID, req.InviteeID)
 	status := http.StatusOK
@@ -230,6 +283,12 @@ func (a *App) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authUser, err := a.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Extract room ID from URL path
 	path := r.URL.Path
 	roomID := ""
@@ -238,6 +297,10 @@ func (a *App) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "GET" && roomID != "" {
+		if authUser.RoomID == nil || *authUser.RoomID != roomID {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		messages := a.GetChatHistory(roomID)
 		json.NewEncoder(w).Encode(messages)
 		return
@@ -249,6 +312,13 @@ func (a *App) handleChat(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
+
+		reqUserID, err := enforceUserMatch(req.UserID, authUser)
+		if err != nil {
+			http.Error(w, "Forbidden: userId does not match token", http.StatusForbidden)
+			return
+		}
+		req.UserID = reqUserID
 
 		result := a.SendChatMessage(req.RoomID, req.UserID, req.Message)
 		response := APIResponse{Message: result}
@@ -275,11 +345,24 @@ func (a *App) handleJoinRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authUser, err := a.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req JoinRoomRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
+
+	reqUserID, err := enforceUserMatch(req.UserID, authUser)
+	if err != nil {
+		http.Error(w, "Forbidden: userId does not match token", http.StatusForbidden)
+		return
+	}
+	req.UserID = reqUserID
 
 	room, err := a.JoinRoom(req.UserID, req.RoomID)
 	message := ""
@@ -308,11 +391,24 @@ func (a *App) handleJoinRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authUser, err := a.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req JoinRoomRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
+
+	reqUserID, err := enforceUserMatch(req.UserID, authUser)
+	if err != nil {
+		http.Error(w, "Forbidden: userId does not match token", http.StatusForbidden)
+		return
+	}
+	req.UserID = reqUserID
 
 	msg, err := a.RequestJoinRoom(req.UserID, req.RoomID)
 	if err != nil {
@@ -340,6 +436,12 @@ func (a *App) handleApproveJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authUser, err := a.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	type ApproveRequest struct {
 		OwnerID     string `json:"ownerId"`
 		RequesterID string `json:"requesterId"`
@@ -352,7 +454,14 @@ func (a *App) handleApproveJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := a.ApproveJoinRequest(req.OwnerID, req.RequesterID, req.RoomID)
+	ownerID, err := enforceUserMatch(req.OwnerID, authUser)
+	if err != nil {
+		http.Error(w, "Forbidden: userId does not match token", http.StatusForbidden)
+		return
+	}
+	req.OwnerID = ownerID
+
+	err = a.ApproveJoinRequest(req.OwnerID, req.RequesterID, req.RoomID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -378,11 +487,24 @@ func (a *App) handleLeave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authUser, err := a.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req LeaveRoomRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
+
+	reqUserID, err := enforceUserMatch(req.UserID, authUser)
+	if err != nil {
+		http.Error(w, "Forbidden: userId does not match token", http.StatusForbidden)
+		return
+	}
+	req.UserID = reqUserID
 
 	result := a.LeaveRoom(req.UserID)
 	response := APIResponse{Message: result}
@@ -405,6 +527,12 @@ func (a *App) handleOperations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authUser, err := a.authenticateRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Extract room ID from URL path
 	path := r.URL.Path
 	roomID := ""
@@ -417,9 +545,15 @@ func (a *App) handleOperations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sinceID := strings.TrimSpace(r.URL.Query().Get("since"))
+	if !a.userInRoom(authUser.ID, roomID) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 
-	operations := a.GetOperations(roomID, sinceID)
+	sinceID := strings.TrimSpace(r.URL.Query().Get("since"))
+	sinceHash := strings.TrimSpace(r.URL.Query().Get("sinceHash"))
+
+	operations := a.GetOperations(roomID, sinceID, sinceHash)
 	json.NewEncoder(w).Encode(operations)
 }
 
@@ -451,16 +585,16 @@ func (a *App) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// Find the operation in any room
 	var targetOp *Operation
-	
+
 	a.mu.RLock()
 	roomIDs := make([]string, 0, len(a.rooms))
 	for id := range a.rooms {
 		roomIDs = append(roomIDs, id)
 	}
 	a.mu.RUnlock()
-	
+
 	for _, rid := range roomIDs {
-		ops := a.GetOperations(rid, "")
+		ops := a.GetOperations(rid, "", "")
 		for _, op := range ops {
 			if op.ID == opID {
 				targetOp = op
@@ -543,7 +677,7 @@ func (a *App) handleClipboardUpload(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("Received clipboard upload from %s in room %s: %d files\n", req.UserName, roomID, len(req.Item.Files))
 
 	op := a.historyPool.AddOperation(roomID, OpAdd, itemID, histItem, req.UserID, req.UserName)
-	
+
 	// Get room members for broadcast
 	a.mu.RLock()
 	room, roomExists := a.rooms[roomID]
@@ -605,16 +739,16 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 	// Find operation in any room
 	var targetOp *Operation
 	var roomID string
-	
+
 	a.mu.RLock()
 	roomIDs := make([]string, 0, len(a.rooms))
 	for id := range a.rooms {
 		roomIDs = append(roomIDs, id)
 	}
 	a.mu.RUnlock()
-	
+
 	for _, rid := range roomIDs {
-		ops := a.GetOperations(rid, "")
+		ops := a.GetOperations(rid, "", "")
 		for _, op := range ops {
 			if op.ID == opID {
 				targetOp = op
@@ -630,6 +764,11 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 	if targetOp == nil {
 		fmt.Printf("Operation not found: %s\n", opID)
 		http.Error(w, "Operation not found", http.StatusNotFound)
+		return
+	}
+
+	if roomID != "" && !a.userInRoom(targetOp.UserID, roomID) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -660,11 +799,11 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 			members = append(members, room.UserIDs...)
 		}
 		a.mu.RUnlock()
-		
+
 		if roomExists {
 			a.sseManager.BroadcastToUsers(members, EventClipboardUpdated, targetOp, "")
 		}
 	}
-	
+
 	w.WriteHeader(http.StatusOK)
 }

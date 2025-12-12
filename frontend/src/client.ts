@@ -76,10 +76,12 @@ function renderUsernameInput(): void {
     }
 
     try {
-      const user = await httpCreateUser({ name: username });
-      globalState.currentUser = { ...user, roomId: user.roomId ?? null };
+      const resp = await httpCreateUser({ name: username });
+      // Persist token for subsequent calls
+      setApiBaseUrl(serverIp || getApiBaseUrl());
+      globalState.currentUser = { ...resp.user, roomId: resp.user.roomId ?? null };
 
-      connectSSE(user.id, {
+      connectSSE(resp.user.id, {
         onUserCreated: () => {
           void updateUserList();
         },

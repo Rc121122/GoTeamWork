@@ -2,14 +2,22 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"GOproject/clip_helper"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -19,7 +27,14 @@ const (
 	roomCleanupInterval    = 30 * time.Minute // Check for empty rooms every 30 minutes
 	userTimeout            = 24 * time.Hour   // Remove inactive users after 24 hours
 	inviteTimeout          = 30 * time.Second // Pending invites expire after 30 seconds
+	defaultJWTExpiry       = 24 * time.Hour
 )
+
+// JWTClaims captures the authenticated user ID for HMAC tokens.
+type JWTClaims struct {
+	UserID string `json:"uid"`
+	jwt.RegisteredClaims
+}
 
 // NewHistoryPool creates a new history pool
 func NewHistoryPool() *HistoryPool {
@@ -39,19 +54,27 @@ func (hp *HistoryPool) AddOperation(roomID string, opType OperationType, itemID 
 
 	// Find the last operation ID for parent
 	var parentID string
+	var parentHash string
 	if ops, exists := hp.operations[roomID]; exists && len(ops) > 0 {
-		parentID = ops[len(ops)-1].ID
+		last := ops[len(ops)-1]
+		parentID = last.ID
+		parentHash = last.Hash
 	}
 
+	timestamp := time.Now().Unix()
+	hash := computeOperationHash(parentHash, opType, itemID, item, userID, userName, timestamp)
+
 	op := &Operation{
-		ID:        id,
-		ParentID:  parentID,
-		OpType:    opType,
-		ItemID:    itemID,
-		Item:      item,
-		Timestamp: time.Now().Unix(),
-		UserID:    userID,
-		UserName:  userName,
+		ID:         id,
+		ParentID:   parentID,
+		ParentHash: parentHash,
+		Hash:       hash,
+		OpType:     opType,
+		ItemID:     itemID,
+		Item:       item,
+		Timestamp:  timestamp,
+		UserID:     userID,
+		UserName:   userName,
 	}
 
 	// Add operation to room history
@@ -78,8 +101,85 @@ func (hp *HistoryPool) enforceLimits(roomID string) {
 		roomID, maxOperationsPerRoom, keepStart)
 }
 
-// GetOperations returns all operations for a room since a given operation ID
-func (hp *HistoryPool) GetOperations(roomID, sinceID string) []*Operation {
+// computeOperationHash builds a stable hash for an operation to support incremental sync.
+func computeOperationHash(parentHash string, opType OperationType, itemID string, item *Item, userID, userName string, timestamp int64) string {
+	fingerprint := buildItemFingerprint(item)
+
+	payload := struct {
+		ParentHash string        `json:"parentHash"`
+		OpType     OperationType `json:"opType"`
+		ItemID     string        `json:"itemId"`
+		Item       interface{}   `json:"item"`
+		UserID     string        `json:"userId"`
+		UserName   string        `json:"userName"`
+		Timestamp  int64         `json:"timestamp"`
+	}{
+		ParentHash: parentHash,
+		OpType:     opType,
+		ItemID:     itemID,
+		Item:       fingerprint,
+		UserID:     userID,
+		UserName:   userName,
+		Timestamp:  timestamp,
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		// Fallback to a timestamp-only hash to avoid breaking flows in unlikely marshal failures
+		h := sha256.Sum256([]byte(fmt.Sprintf("fallback-%d", timestamp)))
+		return hex.EncodeToString(h[:])
+	}
+
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+// buildItemFingerprint produces a lightweight, deterministic view of an item for hashing.
+func buildItemFingerprint(item *Item) interface{} {
+	if item == nil {
+		return nil
+	}
+
+	base := struct {
+		ID   string   `json:"id"`
+		Type ItemType `json:"type"`
+	}{
+		ID:   item.ID,
+		Type: item.Type,
+	}
+
+	switch v := item.Data.(type) {
+	case *ChatMessage:
+		return struct {
+			Base      interface{} `json:"base"`
+			Message   string      `json:"message"`
+			Timestamp int64       `json:"timestamp"`
+		}{
+			Base:      base,
+			Message:   v.Message,
+			Timestamp: v.Timestamp,
+		}
+	case *clip_helper.ClipboardItem:
+		return struct {
+			Base       interface{} `json:"base"`
+			Text       string      `json:"text"`
+			FileCount  int         `json:"fileCount"`
+			ZipBytes   int         `json:"zipBytes"`
+			ImageBytes int         `json:"imageBytes"`
+		}{
+			Base:       base,
+			Text:       v.Text,
+			FileCount:  len(v.Files),
+			ZipBytes:   len(v.ZipData),
+			ImageBytes: len(v.Image),
+		}
+	default:
+		return base
+	}
+}
+
+// GetOperations returns operations for a room after a given operation ID or hash (hash preferred).
+func (hp *HistoryPool) GetOperations(roomID, sinceID, sinceHash string) []*Operation {
 	hp.mu.RLock()
 	defer hp.mu.RUnlock()
 
@@ -88,23 +188,34 @@ func (hp *HistoryPool) GetOperations(roomID, sinceID string) []*Operation {
 		return []*Operation{}
 	}
 
-	if sinceID == "" {
-		// Return all
-		result := make([]*Operation, len(ops))
-		copy(result, ops)
-		return result
-	}
+	startIdx := 0
 
-	// Find index of sinceID
-	startIdx := -1
-	for i, op := range ops {
-		if op.ID == sinceID {
-			startIdx = i + 1
-			break
+	if sinceHash != "" {
+		startIdx = -1
+		for i, op := range ops {
+			if op.Hash == sinceHash {
+				startIdx = i + 1
+				break
+			}
+		}
+		if startIdx == -1 {
+			// Unknown hash (likely trimmed); return full list so the client can resync
+			startIdx = 0
+		}
+	} else if sinceID != "" {
+		startIdx = -1
+		for i, op := range ops {
+			if op.ID == sinceID {
+				startIdx = i + 1
+				break
+			}
+		}
+		if startIdx == -1 {
+			return []*Operation{}
 		}
 	}
 
-	if startIdx == -1 || startIdx >= len(ops) {
+	if startIdx >= len(ops) {
 		return []*Operation{}
 	}
 
@@ -206,6 +317,8 @@ type App struct {
 	pendingClipboardMu    sync.Mutex
 	pendingClipboardItem  *clip_helper.ClipboardItem
 	pendingClipboardAt    time.Time
+
+	jwtSecret []byte
 }
 
 const (
@@ -215,6 +328,19 @@ const (
 
 // NewApp creates a new App application struct
 func NewApp(mode string) *App {
+	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	if secret == "" && mode == "host" {
+		if generated, err := generateJWTSecret(); err == nil {
+			secret = generated
+			fmt.Println("Generated ephemeral JWT secret for host mode; set JWT_SECRET to persist across restarts")
+		} else {
+			fmt.Printf("WARNING: failed to generate JWT secret, using insecure default: %v\n", err)
+			secret = "dev-insecure-change-me"
+		}
+	} else if secret == "" {
+		secret = "dev-insecure-change-me"
+	}
+
 	app := &App{
 		Mode:           mode,
 		users:          make(map[string]*User),
@@ -222,6 +348,7 @@ func NewApp(mode string) *App {
 		pendingInvites: make(map[string]*PendingInvite),
 		historyPool:    NewHistoryPool(),
 		sseManager:     NewSSEManager(),
+		jwtSecret:      []byte(secret),
 	}
 
 	// Initialize with a default current user for host mode
@@ -357,8 +484,8 @@ func (a *App) Invite(userID string) string {
 	return fmt.Sprintf("Successfully invited %s to room %s", user.Name, a.currentRoom.Name)
 }
 
-// CreateRoom creates a new room with the given name
-func (a *App) CreateRoom(name string) *Room {
+// CreateRoom creates a new room with the given name and owner
+func (a *App) CreateRoom(name, ownerID string) *Room {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -372,7 +499,7 @@ func (a *App) CreateRoom(name string) *Room {
 	room := &Room{
 		ID:      roomID,
 		Name:    cleanName,
-		OwnerID: "host", // Default to host for now, or we need to pass creator ID
+		OwnerID: ownerID,
 		UserIDs: []string{},
 	}
 	a.rooms[roomID] = room
@@ -452,6 +579,18 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func (a *App) userInRoom(userID, roomID string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	room, ok := a.rooms[roomID]
+	if !ok {
+		return false
+	}
+
+	return contains(room.UserIDs, userID)
 }
 
 // AcceptInvite converts a pending invite into an active room when the invitee accepts.
@@ -606,12 +745,12 @@ func (a *App) SetServerURL(url string) {
 		fmt.Println("SetServerURL: Not in client mode or network client not initialized")
 		return
 	}
-	
+
 	// URL should already be properly formatted from frontend
 	// Just set it directly
 	a.networkClient.serverURL = url
 	fmt.Printf("Server URL set to: %s\n", url)
-	
+
 	// Don't auto-connect here - connection will happen when user creates account
 }
 
@@ -902,8 +1041,8 @@ func (a *App) GetChatHistory(roomID string) []*ChatMessage {
 	return a.historyPool.GetCurrentChatMessages(roomID)
 }
 
-// GetOperations returns operations for a room since a given ID
-func (a *App) GetOperations(roomID, sinceID string) []*Operation {
+// GetOperations returns operations for a room since a given ID or hash.
+func (a *App) GetOperations(roomID, sinceID, sinceHash string) []*Operation {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -914,7 +1053,95 @@ func (a *App) GetOperations(roomID, sinceID string) []*Operation {
 		}
 	}
 
-	return a.historyPool.GetOperations(roomID, sinceID)
+	return a.historyPool.GetOperations(roomID, sinceID, sinceHash)
+}
+
+func (a *App) issueToken(userID string) (string, error) {
+	claims := JWTClaims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID,
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(defaultJWTExpiry)),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(a.jwtSecret)
+}
+
+func (a *App) authenticateRequest(r *http.Request) (*User, error) {
+	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authHeader == "" {
+		return nil, errors.New("missing Authorization header")
+	}
+
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return nil, errors.New("invalid Authorization header")
+	}
+
+	tokenString := strings.TrimSpace(parts[1])
+	if tokenString == "" {
+		return nil, errors.New("empty token")
+	}
+
+	claims := &JWTClaims{}
+	parsed, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return a.jwtSecret, nil
+	})
+	if err != nil || parsed == nil || !parsed.Valid {
+		return nil, errors.New("invalid token")
+	}
+
+	a.mu.RLock()
+	user, ok := a.users[claims.UserID]
+	a.mu.RUnlock()
+	if !ok {
+		return nil, errors.New("user not found")
+	}
+
+	return user, nil
+}
+
+func (a *App) authenticateToken(tokenString string) (*User, error) {
+	tokenString = strings.TrimSpace(tokenString)
+	if tokenString == "" {
+		return nil, errors.New("empty token")
+	}
+
+	claims := &JWTClaims{}
+	parsed, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return a.jwtSecret, nil
+	})
+	if err != nil || parsed == nil || !parsed.Valid {
+		return nil, errors.New("invalid token")
+	}
+
+	a.mu.RLock()
+	user, ok := a.users[claims.UserID]
+	a.mu.RUnlock()
+	if !ok {
+		return nil, errors.New("user not found")
+	}
+
+	return user, nil
+}
+
+func enforceUserMatch(reqUserID string, authUser *User) (string, error) {
+	if reqUserID == "" {
+		return authUser.ID, nil
+	}
+	if reqUserID != authUser.ID {
+		return "", errors.New("userId does not match token")
+	}
+	return reqUserID, nil
 }
 
 // corsMiddleware wraps a handler with CORS headers
@@ -925,15 +1152,30 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
 		w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
-		
+
 		// Handle preflight OPTIONS request
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		next(w, r)
 	}
+}
+
+func getEnvDefault(key, fallback string) string {
+	if val := strings.TrimSpace(os.Getenv(key)); val != "" {
+		return val
+	}
+	return fallback
+}
+
+func generateJWTSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 // StartHTTPServer starts the HTTP server for REST API
