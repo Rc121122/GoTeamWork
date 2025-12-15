@@ -1,37 +1,30 @@
 # GoTeamWork
-Collaborative clipboard and chat application with real-time synchronization
 
-## 📝 Description
-GoTeamWork is a collaborative clipboard and chat application that allows seamless data sharing across devices. It supports two operational modes:
+A real-time collaborative clipboard sharing and chat application built with Go and Wails, enabling seamless data synchronization across devices in team environments.
 
-- **Host Mode**: Acts as a central server providing REST API for user/room management
-- **Client Mode**: Connects to the host server with username authentication and waiting lobby
+## Features
 
-## 🚀 Features
-- 📋 Real-time clipboard synchronization (Host mode)
-- 💬 Group chat functionality (Host mode)
-- 🖥️ Cross-platform GUI using Wails
-- 🌐 REST API for central server communication
-- 👥 User management with unique username validation
-- 🏠 Room-based collaboration with automatic lifecycle management
-- 🔄 Real-time user list updates (Client mode)
-- 🎯 Invitation system for room joining
+- **Real-time Clipboard Synchronization**: Share clipboard content instantly between host and connected clients
+- **Group Chat**: Built-in chat functionality for team communication
+- **Cross-Platform GUI**: Native desktop application using Wails framework
+- **Host/Client Architecture**: Flexible deployment with central host server and multiple clients
+- **User Management**: Username-based authentication with unique validation
+- **Room System**: Dynamic room creation and invitation-based joining
+- **REST API**: Comprehensive API for client-server communication
+- **LAN Discovery**: Automatic network scanning for host discovery
+- **Hotkey Integration**: Clipboard sharing triggered by customizable hotkeys
 
-## 📦 Prerequisites
+## Prerequisites
 
-### 1. Go Installation
 - Go 1.25.2 or higher
-- Install from: https://go.dev/dl/
+- Node.js and npm (for frontend)
+- Wails v2 CLI
 
-### 2. Wails Installation
-Wails requires certain dependencies based on your operating system:
+### Installing Dependencies
 
 #### macOS
 ```bash
-# Install Xcode Command Line Tools (if not already installed)
 xcode-select --install
-
-# Install Wails CLI
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
@@ -41,237 +34,195 @@ go install github.com/wailsapp/wails/v2/cmd/wails@latest
 sudo apt update
 sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
 
-# Fedora
-sudo dnf install gcc-c++ pkg-config gtk3-devel webkit2gtk3-devel
-
-# Arch
-sudo pacman -S gcc pkg-config gtk3 webkit2gtk
-
-# Install Wails CLI
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
 #### Windows
 ```bash
-# Install Wails CLI (run in PowerShell or CMD)
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
-
-# Note: Requires WebView2 runtime (usually pre-installed on Windows 10/11)
-# Download if needed: https://developer.microsoft.com/microsoft-edge/webview2/
+# Ensure WebView2 runtime is installed
 ```
 
-## 🛠️ Setup Instructions
+## Installation
 
-### 1. Clone the Repository
+1. Clone the repository:
 ```bash
-git clone https://github.com/Rc121122/GoTeamWork.git
+git clone https://github.com/yourusername/GoTeamWork.git
 cd GoTeamWork
 ```
 
-### 2. Install Go Dependencies
+2. Install Go dependencies:
 ```bash
-# Download all required Go modules
 go mod download
-
-# Verify installation
-go mod verify
 ```
 
-### 3. Install Frontend Dependencies
+3. Install frontend dependencies:
 ```bash
-# Install Node.js dependencies for the frontend
 cd frontend
 npm install
 cd ..
 ```
 
-### 4. Build the Application
+4. Build the application:
 ```bash
-# Check Wails installation and system requirements
-wails doctor
-
-# Build the application with frontend
 wails build
 ```
 
-## 🏃 Running the Application
+## Usage
 
-### Host Mode (Central Server)
-Run the application as a central server that provides REST API and manages users/rooms:
-
+### Running as Host (Server)
 ```bash
-# Production build
 ./build/bin/GOproject.app/Contents/MacOS/GOproject --mode host
-
-# Development mode (with hot reload)
-wails dev --mode host
 ```
 
-**Host Mode Features:**
-- Starts HTTP server on port 8080
-- Provides REST API endpoints for client communication
-- Shows chat/clipboard interface for the host user
-- Manages user authentication and room creation
+The host provides:
+- REST API server on port 8080
+- WebSocket connections for real-time updates
+- Clipboard sharing interface
+- Chat functionality
 
-### Client Mode (User Interface)
-Run the application as a client that connects to the host server:
-
+### Running as Client
 ```bash
-# Production build
 ./build/bin/GOproject.app/Contents/MacOS/GOproject --mode client
-
-# Development mode (with hot reload)
-wails dev --mode client
 ```
 
-**Client Mode Features:**
-- Username input screen with validation
-- Waiting lobby showing all online users
-- Real-time user list updates (every 5 seconds)
-- Invite buttons for joining rooms
+Clients can:
+- Connect to host servers
+- Join rooms via invitations
+- Share clipboard content
+- Participate in group chat
 
 ### Development Mode
 ```bash
-# Run with Wails development server (hot reload)
-wails dev
-
-# The mode can be specified via command line or UI
+wails dev --mode host
+# or
+wails dev --mode client
 ```
 
-### Production Build
-```bash
-# Build for your current platform
-wails build
+## Project Structure
 
-# Build for specific platforms
-wails build -platform darwin/amd64    # macOS Intel
-wails build -platform darwin/arm64    # macOS Apple Silicon
-wails build -platform windows/amd64   # Windows
-wails build -platform linux/amd64     # Linux
-```
-
-## 📚 Project Structure
 ```
 GoTeamWork/
-├── main.go              # Application entry point and mode selection
-├── app.go               # Core application logic, user/room management, HTTP API
-├── network.go           # Network operations (LAN scan, sync, connections)
-├── go.mod               # Go module dependencies
-├── go.sum               # Go module checksums
-├── wails.json           # Wails configuration
-├── frontend/            # Frontend application
-│   ├── index.html       # Main HTML page
-│   ├── package.json     # Node.js dependencies
-│   ├── src/             # Frontend source code
-│   │   ├── main.js      # Main JavaScript application
-│   │   ├── style.css    # Global styles
-│   │   └── app.css      # Component styles
-│   └── wailsjs/         # Generated Wails bindings
-├── build/               # Build output directory
-│   └── bin/             # Compiled binaries
-├── ApiMethod.md         # API methods documentation
-├── design.md            # Design documentation
-└── README.md            # This file
+├── main.go                 # Application entry point
+├── app.go                  # Core application logic
+├── network.go              # Network utilities and LAN scanning
+├── types.go                # Data structures and types
+├── handlers.go             # HTTP API handlers
+├── sse.go                  # Server-Sent Events implementation
+├── sanitize.go             # Input sanitization utilities
+├── auth_test.go            # Authentication tests
+├── clipboard_test.go       # Clipboard functionality tests
+├── clip.go                 # Clipboard operations
+├── clip_hotkey_test.go     # Hotkey tests
+├── handlers_test.go        # API handler tests
+├── history_hash_test.go    # History hash tests
+├── history_test.go         # History tests
+├── sanitize_test.go        # Sanitization tests
+├── sse_test.go             # SSE tests
+├── sse_routes_test.go      # SSE routes tests
+├── go.mod                  # Go module file
+├── wails.json              # Wails configuration
+├── frontend/               # Frontend application
+│   ├── index.html
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── vite.config.ts
+│   └── src/
+│       ├── App.tsx
+│       ├── main.tsx
+│       ├── state.ts
+│       ├── client.ts
+│       ├── host.ts
+│       ├── sse.ts
+│       ├── api/
+│       │   ├── httpClient.ts
+│       │   └── types.ts
+│       └── components/
+│           ├── HostDashboard.tsx
+│           ├── HUD.tsx
+│           ├── LandingPage.tsx
+│           ├── Lobby.tsx
+│           ├── Modals.tsx
+│           ├── NewUserPage.tsx
+│           ├── Room.tsx
+│           ├── Sidebar.tsx
+│           └── TitleBar.tsx
+├── build/                  # Build output
+├── docs/                   # Documentation
+├── internal/               # Internal packages
+├── test_clip/              # Test utilities
+└── tests/                  # Test files
 ```
 
-## 🔧 Configuration
-Configuration options will be available in a config file (to be implemented):
-- Network settings (ports, timeouts)
-- UI preferences
-- Server address for Central Mode
-- Auto-start preferences
-
-## 🐛 Troubleshooting
-
-### Wails Build Issues
-```bash
-# Check system requirements
-wails doctor
-
-# Clean build cache
-go clean -cache
-rm -rf build/
-```
-
-### Mode Selection Issues
-```bash
-# Always use the built binary, not the go build output
-./build/bin/GOproject.app/Contents/MacOS/GOproject --mode host
-./build/bin/GOproject.app/Contents/MacOS/GOproject --mode client
-
-# Don't use: ./GOproject --mode host (missing Wails build tags)
-```
-
-### Network Issues
-- Ensure firewall allows the application (port 8080 for host mode)
-- Check network permissions on macOS/Linux
-- Host and clients must be able to communicate via HTTP
-
-### Frontend Issues
-```bash
-# Rebuild frontend dependencies
-cd frontend
-rm -rf node_modules package-lock.json
-npm install
-cd ..
-wails build
-```
-
-### API Connection Issues
-- Verify host is running: `curl http://localhost:8080/api/users`
-- Check that client can reach the host server
-- Ensure CORS headers are properly configured
-
-## 📖 Documentation
-- [API Methods Documentation](ApiMethod.md) - Complete API reference
-- [Wails Documentation](https://wails.io/docs/introduction)
-- [Go Documentation](https://go.dev/doc/)
-
-## 👨‍💻 Development
-The application is fully implemented with the following components:
-
-- **Backend**: Go application with Wails framework
-- **Frontend**: HTML/CSS/JavaScript with modern UI
-- **API**: REST endpoints for client-server communication
-- **Modes**: Host mode (server) and Client mode (user interface)
-
-### API Documentation
-See [ApiMethod.md](ApiMethod.md) for detailed API method documentation.
-
-### Architecture
-- **Host Mode**: Provides central server functionality with REST API
-- **Client Mode**: User interface for joining and collaborating
-- **Room System**: Dynamic room creation and management
-- **User Management**: Authentication and online status tracking
-
-## 🔌 API Endpoints (Host Mode)
-
-When running in host mode, the application provides REST API endpoints on `http://localhost:8080`:
+## API Documentation
 
 ### User Management
-- `GET /api/users` - List all users
-- `POST /api/users` - Create new user
-- `GET /api/users/{id}` - Get specific user
+- `POST /api/users` - Create user
+- `GET /api/users` - List users
+- `GET /api/users/{id}` - Get user details
 
 ### Room Management
-- `GET /api/rooms` - List all rooms
-- `POST /api/invite` - Invite user to room
+- `GET /api/rooms` - List rooms
+- `POST /api/invite` - Send room invitation
+- `POST /api/invite/accept` - Accept invitation
+- `POST /api/join` - Join room
 
-### Usage Example
+### Authentication
+- JWT-based authentication required for API access
+- Set `JWT_SECRET` environment variable for production
+
+## Configuration
+
+### Environment Variables
+- `JWT_SECRET`: Secret key for JWT token generation (required for production)
+
+### Build Configuration
+Modify `wails.json` for build settings and platform targets.
+
+## Development
+
+### Running Tests
 ```bash
-# Start host server
-./build/bin/GOproject.app/Contents/MacOS/GOproject --mode host
-
-# In another terminal, create a user
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"name":"Alice"}' http://localhost:8080/api/users
-
-# List all users
-curl http://localhost:8080/api/users
+go test ./...
 ```
 
-## 📄 License
-[Specify your license here]
+### Building for Different Platforms
+```bash
+# macOS Intel
+wails build -platform darwin/amd64
 
-## 🤝 Contributing
-Contributions are welcome! Please feel free to submit a Pull Request.
+# macOS Apple Silicon
+wails build -platform darwin/arm64
+
+# Windows
+wails build -platform windows/amd64
+
+# Linux
+wails build -platform linux/amd64
+```
+
+## Security
+
+- Input sanitization implemented
+- JWT authentication for API access
+- No hardcoded secrets in production builds
+- Environment-based configuration
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+## License
+
+[Add your license information here]
+
+## Support
+
+For issues and questions:
+- Check the [API documentation](docs/ApiMethod.md)
+- Review [design documentation](docs/design.md)
+- Open an issue on GitHub
