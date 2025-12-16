@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -620,7 +622,7 @@ func (a *App) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if itemData.IsSingleFile {
-		if len(itemData.SingleFileData) == 0 {
+		if itemData.SingleFilePath == "" {
 			http.Error(w, "No file data available", http.StatusNotFound)
 			return
 		}
@@ -633,23 +635,43 @@ func (a *App) handleDownload(w http.ResponseWriter, r *http.Request) {
 			mimeType = "application/octet-stream"
 		}
 
+		file, err := os.Open(itemData.SingleFilePath)
+		if err != nil {
+			http.Error(w, "Failed to open file", http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+
 		w.Header().Set("Content-Type", mimeType)
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(itemData.SingleFileData)))
-		w.Write(itemData.SingleFileData)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", itemData.SingleFileSize))
+		io.Copy(w, file)
 		return
 	}
 
-	if len(itemData.ZipData) == 0 {
+	if itemData.ZipFilePath == "" {
 		http.Error(w, "No file data available", http.StatusNotFound)
+		return
+	}
+
+	file, err := os.Open(itemData.ZipFilePath)
+	if err != nil {
+		http.Error(w, "Failed to open file", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		http.Error(w, "Failed to get file info", http.StatusInternalServerError)
 		return
 	}
 
 	// Set headers for file download
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"shared_files_%s.zip\"", opID))
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(itemData.ZipData)))
-	w.Write(itemData.ZipData)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+	io.Copy(w, file)
 }
 
 // handleClipboardUpload handles POST /api/clipboard
@@ -829,9 +851,17 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 		if fileMime == "" {
 			fileMime = "application/octet-stream"
 		}
+		singleFilePath := filepath.Join(a.tempDir, opID+"_"+fileName)
+		if err := os.WriteFile(singleFilePath, zipData, 0644); err != nil {
+			fmt.Printf("Failed to write single file: %v\n", err)
+			http.Error(w, "Failed to save file", http.StatusInternalServerError)
+			a.mu.Unlock()
+			return
+		}
 		itemData.IsSingleFile = true
 		itemData.SingleFileName = fileName
 		itemData.SingleFileMime = fileMime
+		itemData.SingleFilePath = singleFilePath
 		if fileThumb != "" {
 			itemData.SingleFileThumb = fileThumb
 		}
@@ -844,13 +874,18 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 		} else {
 			itemData.SingleFileSize = int64(len(zipData))
 		}
-		itemData.SingleFileData = zipData
 		itemData.ZipData = nil
 		itemData.Text = fmt.Sprintf("%s (%s) ready", fileName, clip_helper.HumanFileSize(itemData.SingleFileSize))
 	} else {
-		itemData.ZipData = zipData
+		zipFilePath := filepath.Join(a.tempDir, opID+".zip")
+		if err := os.WriteFile(zipFilePath, zipData, 0644); err != nil {
+			fmt.Printf("Failed to write zip file: %v\n", err)
+			http.Error(w, "Failed to save file", http.StatusInternalServerError)
+			a.mu.Unlock()
+			return
+		}
+		itemData.ZipFilePath = zipFilePath
 		itemData.IsSingleFile = false
-		itemData.SingleFileData = nil
 		itemData.Text = fmt.Sprintf("%d files compressed (ready)", len(itemData.Files))
 	}
 	a.mu.Unlock()

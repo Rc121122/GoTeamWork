@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -13,7 +14,14 @@ import (
 const testdataDir = "tests/testdata"
 
 func newTestApp() *App {
-	return NewApp("host")
+	app := NewApp("host")
+	// Set up temp directory for tests
+	app.tempDir = filepath.Join(os.TempDir(), "GoTeamWork_test_temp")
+	os.RemoveAll(app.tempDir) // Clean
+	if err := os.MkdirAll(app.tempDir, 0755); err != nil {
+		panic(fmt.Sprintf("Failed to create test temp dir: %v", err))
+	}
+	return app
 }
 
 func mustLoadTestJSON(t *testing.T, filename string, placeholders map[string]string) []byte {

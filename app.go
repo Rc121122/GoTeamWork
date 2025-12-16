@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -320,6 +321,8 @@ type App struct {
 	pendingClipboardItem  *clip_helper.ClipboardItem
 	pendingClipboardAt    time.Time
 
+	tempDir               string
+
 	jwtSecret      []byte
 	zeroconfServer *zeroconf.Server
 }
@@ -375,6 +378,16 @@ func NewApp(mode string) *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// Create and clean temp directory for file storage
+	a.tempDir = filepath.Join(os.TempDir(), "GoTeamWork_temp")
+	os.RemoveAll(a.tempDir) // Clean previous temp files
+	if err := os.MkdirAll(a.tempDir, 0755); err != nil {
+		fmt.Printf("Failed to create temp dir: %v\n", err)
+		return
+	}
+	fmt.Printf("Temp directory created: %s\n", a.tempDir)
+
 	fmt.Printf("Starting in %s mode\n", a.Mode)
 
 	// Initialize test users only for host mode (but not the host itself)

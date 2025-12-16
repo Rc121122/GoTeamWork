@@ -27,6 +27,9 @@ type ClipboardItem struct {
 	SingleFileSize  int64  `json:"singleFileSize,omitempty"`
 	SingleFileThumb string `json:"singleFileThumb,omitempty"`
 	SingleFileData  []byte `json:"-"` // raw bytes for direct download
+
+	ZipFilePath     string `json:"-"` // Path to zip file on disk
+	SingleFilePath  string `json:"-"` // Path to single file on disk
 }
 
 const (

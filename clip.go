@@ -103,7 +103,7 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 		}
 
 		// If file, start async zip
-		if item.Type == clip_helper.ClipboardFile && len(item.ZipData) == 0 && len(item.Files) > 0 {
+		if item.Type == clip_helper.ClipboardFile && item.ZipFilePath == "" && len(item.Files) > 0 {
 			go a.processFileZip("global", op.ItemID, item, op.ID)
 		}
 		return
@@ -143,7 +143,7 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 	}
 
 	// If it's a file type and ZipData is empty, start async zipping
-	if item.Type == clip_helper.ClipboardFile && len(item.ZipData) == 0 && len(item.Files) > 0 {
+	if item.Type == clip_helper.ClipboardFile && item.ZipFilePath == "" && len(item.Files) > 0 {
 		go a.processFileZip(roomID, itemID, item, "")
 	}
 }
@@ -222,9 +222,16 @@ func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardI
 		return
 	}
 
+	// Save the zip file to temp directory
+	zipFilePath := filepath.Join(a.tempDir, itemID+".zip")
+	if err := os.WriteFile(zipFilePath, zipData, 0644); err != nil {
+		fmt.Printf("Failed to write zip file: %v\n", err)
+		return
+	}
+
 	// Update the item in history pool
 	a.mu.Lock()
-	item.ZipData = zipData
+	item.ZipFilePath = zipFilePath
 	item.Text = fmt.Sprintf("%d files compressed (ready)", len(item.Files))
 	a.mu.Unlock()
 
@@ -232,7 +239,13 @@ func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardI
 
 	if a.Mode == "client" {
 		if serverOpID != "" {
-			if err := a.networkClient.UploadZipData(serverOpID, zipData); err != nil {
+			// Read zip data from file for upload
+			uploadedData, err := os.ReadFile(zipFilePath)
+			if err != nil {
+				fmt.Printf("Failed to read zip file for upload: %v\n", err)
+				return
+			}
+			if err := a.networkClient.UploadZipData(serverOpID, uploadedData); err != nil {
 				fmt.Printf("Failed to upload zip data: %v\n", err)
 				return
 			}
@@ -262,13 +275,20 @@ func (a *App) processSingleFileShare(roomID, itemID string, item *clip_helper.Cl
 	mimeType := detectMimeType(fileName)
 	thumb := buildFileThumb(fileName)
 
+	// Save the single file to temp directory
+	singleFilePath := filepath.Join(a.tempDir, itemID+"_"+fileName)
+	if err := os.WriteFile(singleFilePath, data, 0644); err != nil {
+		fmt.Printf("Failed to write single file: %v\n", err)
+		return
+	}
+
 	a.mu.Lock()
 	item.IsSingleFile = true
 	item.SingleFileName = fileName
 	item.SingleFileMime = mimeType
 	item.SingleFileSize = info.Size()
 	item.SingleFileThumb = thumb
-	item.SingleFileData = data
+	item.SingleFilePath = singleFilePath
 	item.ZipData = nil
 	item.Text = fmt.Sprintf("%s (%s) ready", fileName, clip_helper.HumanFileSize(info.Size()))
 	a.mu.Unlock()
@@ -277,7 +297,13 @@ func (a *App) processSingleFileShare(roomID, itemID string, item *clip_helper.Cl
 
 	if a.Mode == "client" {
 		if serverOpID != "" {
-			if err := a.networkClient.UploadSingleFileData(serverOpID, data, fileName, mimeType, info.Size(), thumb); err != nil {
+			// Read file data from disk for upload
+			uploadedData, err := os.ReadFile(singleFilePath)
+			if err != nil {
+				fmt.Printf("Failed to read single file for upload: %v\n", err)
+				return
+			}
+			if err := a.networkClient.UploadSingleFileData(serverOpID, uploadedData, fileName, mimeType, info.Size(), thumb); err != nil {
 				fmt.Printf("Failed to upload single file data: %v\n", err)
 			}
 			fmt.Printf("Uploaded single file data for op %s\n", serverOpID)

@@ -2,10 +2,16 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"GOproject/clip_helper"
 )
 
 func TestHandleUsersLifecycle(t *testing.T) {
@@ -288,5 +294,120 @@ func TestHandleOperationsRequiresRoom(t *testing.T) {
 	app.handleOperations(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 when room ID missing, got %d", rr.Code)
+	}
+}
+
+func TestTempDirectoryLargeFile(t *testing.T) {
+	app := newTestApp()
+	defer os.RemoveAll(app.tempDir) // Clean up after test
+
+	// Create a test user and room
+	user := app.CreateUser("TestUser")
+	room := app.CreateRoom("TestRoom", user.ID)
+	app.JoinRoom(user.ID, room.ID)
+
+	// Simulate clipboard copy with files
+	itemID := "test_clip_" + fmt.Sprintf("%d", time.Now().UnixNano())
+	histItem := &Item{
+		ID:   itemID,
+		Type: ItemClipboard,
+		Data: &clip_helper.ClipboardItem{
+			Type:  clip_helper.ClipboardFile,
+			Text:  "Test files",
+			Files: []string{"/nonexistent/file1.txt", "/nonexistent/file2.txt"}, // Dummy files
+		},
+	}
+	op := app.historyPool.AddOperation(room.ID, OpAdd, itemID, histItem, user.ID, user.Name)
+
+	// Simulate zip upload (large file)
+	largeData := make([]byte, 1024*1024) // 1MB "large" file for test
+	for i := range largeData {
+		largeData[i] = byte(i % 256)
+	}
+
+	// Create request to /api/clipboard/{opID}/zip
+	url := "/api/clipboard/" + op.ID + "/zip"
+	req := httptest.NewRequest(http.MethodPost, url, bytes.NewReader(largeData))
+	req.Header.Set("Content-Type", "application/zip")
+
+	rr := httptest.NewRecorder()
+	app.handleZipUpload(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for zip upload, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Check if file was saved to temp dir
+	files, err := os.ReadDir(app.tempDir)
+	if err != nil {
+		t.Fatalf("failed to read temp dir: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file in temp dir, got %d", len(files))
+	}
+
+	filePath := filepath.Join(app.tempDir, files[0].Name())
+	savedData, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read saved file: %v", err)
+	}
+	if len(savedData) != len(largeData) {
+		t.Fatalf("saved file size mismatch: expected %d, got %d", len(largeData), len(savedData))
+	}
+	for i, b := range savedData {
+		if b != largeData[i] {
+			t.Fatalf("data mismatch at byte %d", i)
+		}
+	}
+
+	// Check that the item has ZipFilePath set
+	ops := app.historyPool.GetOperations(room.ID, "", "")
+	var targetOp *Operation
+	for _, o := range ops {
+		if o.ID == op.ID {
+			targetOp = o
+			break
+		}
+	}
+	if targetOp == nil {
+		t.Fatalf("operation not found")
+	}
+	clipItem, ok := targetOp.Item.Data.(*clip_helper.ClipboardItem)
+	if !ok {
+		t.Fatalf("invalid item data")
+	}
+	if clipItem.ZipFilePath != filePath {
+		t.Fatalf("ZipFilePath not set correctly: expected %s, got %s", filePath, clipItem.ZipFilePath)
+	}
+
+	// Simulate download by another user
+	// Create another user
+	user2 := app.CreateUser("TestUser2")
+	app.JoinRoom(user2.ID, room.ID)
+
+	// Download request
+	downloadURL := "/api/download/" + op.ID
+	req2 := httptest.NewRequest(http.MethodGet, downloadURL, nil)
+	rr2 := httptest.NewRecorder()
+	app.handleDownload(rr2, req2)
+
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for download, got %d: %s", rr2.Code, rr2.Body.String())
+	}
+
+	// Check response headers
+	if rr2.Header().Get("Content-Type") != "application/zip" {
+		t.Fatalf("expected Content-Type application/zip, got %s", rr2.Header().Get("Content-Type"))
+	}
+
+	// Check response body
+	downloadedData := rr2.Body.Bytes()
+	if len(downloadedData) != len(largeData) {
+		t.Fatalf("downloaded data size mismatch: expected %d, got %d", len(largeData), len(downloadedData))
+	}
+	for i, b := range downloadedData {
+		if b != largeData[i] {
+			t.Fatalf("downloaded data mismatch at byte %d", i)
+		}
 	}
 }
