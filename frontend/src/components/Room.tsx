@@ -61,7 +61,22 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
 
     const onChatMsg = (msg: ChatMessage) => {
         if (msg.roomId === currentRoom.id) {
-            setMessages(prev => [...prev, msg]);
+            setMessages(prev => {
+                // Check if this is our own message that we already added locally
+                const existingIndex = prev.findIndex(m => 
+                    m.userId === msg.userId && 
+                    m.message === msg.message && 
+                    Math.abs(m.timestamp - msg.timestamp) < 10 // within 10 seconds
+                );
+                if (existingIndex !== -1) {
+                    // Replace the local message with the server message
+                    const newMessages = [...prev];
+                    newMessages[existingIndex] = msg;
+                    return newMessages;
+                } else {
+                    return [...prev, msg];
+                }
+            });
         }
     };
 
@@ -136,14 +151,24 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
+    const messageToSend = newMessage.trim();
     try {
       if (appMode === 'client') {
-        await httpSendChatMessage({ roomId: currentRoom.id, userId: currentUser.id, message: newMessage });
+        await httpSendChatMessage({ roomId: currentRoom.id, userId: currentUser.id, message: messageToSend });
       } else {
-        await hostSendChatMessage(currentRoom.id, currentUser.id, newMessage);
+        await hostSendChatMessage(currentRoom.id, currentUser.id, messageToSend);
       }
+      // Immediately add the message to local state
+      const sentMessage: ChatMessage = {
+        id: `sent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        roomId: currentRoom.id,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        message: messageToSend,
+        timestamp: Date.now() / 1000,
+      };
+      setMessages(prev => [...prev, sentMessage]);
       setNewMessage('');
-      // refreshChat(); // No longer needed as we receive our own message via SSE
     } catch (err) {
       console.error(err);
     }

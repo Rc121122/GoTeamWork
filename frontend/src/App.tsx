@@ -131,9 +131,9 @@ function App() {
     };
   }, [appMode, isHUDEnabled]);
 
-  // Connect to SSE when currentUser is set (and mode is client)
+  // Connect to SSE when currentUser is set
   useEffect(() => {
-    if (appMode === 'client' && currentUser) {
+    if (currentUser) {
       console.log("Connecting to SSE for user:", currentUser.id);
       connectSSE(currentUser.id);
 
