@@ -40,7 +40,7 @@ func main() {
 		Windows: &windows.Options{
 			WebviewIsTransparent: true,
 			WindowIsTranslucent:  true,
-
+			DisableFramelessWindowDecorations: true,
 		},
 		OnStartup: app.startup,
 		Bind: []interface{}{
