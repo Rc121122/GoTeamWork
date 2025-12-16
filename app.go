@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"GOproject/clip_helper"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/grandcat/zeroconf"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -318,7 +320,8 @@ type App struct {
 	pendingClipboardItem  *clip_helper.ClipboardItem
 	pendingClipboardAt    time.Time
 
-	jwtSecret []byte
+	jwtSecret      []byte
+	zeroconfServer *zeroconf.Server
 }
 
 const (
@@ -329,16 +332,16 @@ const (
 // NewApp creates a new App application struct
 func NewApp(mode string) *App {
 	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
-	if secret == "" && mode == "host" {
+	if secret == "" {
 		if generated, err := generateJWTSecret(); err == nil {
 			secret = generated
-			fmt.Println("Generated ephemeral JWT secret for host mode; set JWT_SECRET to persist across restarts")
+			if mode == "host" {
+				fmt.Println("Generated ephemeral JWT secret for host mode; set JWT_SECRET to persist across restarts")
+			}
 		} else {
 			fmt.Printf("WARNING: failed to generate JWT secret, using insecure default: %v\n", err)
 			secret = "dev-insecure-change-me"
 		}
-	} else if secret == "" {
-		secret = "dev-insecure-change-me"
 	}
 
 	app := &App{
@@ -383,6 +386,15 @@ func (a *App) startup(ctx context.Context) {
 
 		// Start HTTP server for central server functionality
 		a.StartHTTPServer("8080")
+
+		// Register zeroconf service for discovery
+		server, err := zeroconf.Register("GoTeamWork", "_http._tcp", "local.", 8080, []string{"version=1.0"}, nil)
+		if err != nil {
+			fmt.Printf("Failed to register zeroconf service: %v\n", err)
+		} else {
+			a.zeroconfServer = server
+			fmt.Println("Zeroconf service registered for discovery")
+		}
 
 		// Start cleanup goroutines for host mode
 		go a.startCleanupTasks(ctx)
@@ -1073,8 +1085,8 @@ func (a *App) SendChatMessage(roomID, userID, message string) string {
 
 	// Add operation and notify consumers about the delta (not the entire history)
 	a.historyPool.AddOperation(roomID, OpAdd, msg.ID, item, userID, userName)
-	// Broadcast to all members including the sender (pass empty string as excludeUserID)
-	a.sseManager.BroadcastToUsers(members, EventChatMessage, msg, "")
+	// Broadcast to all members except the sender
+	a.sseManager.BroadcastToUsers(members, EventChatMessage, msg, userID)
 
 	fmt.Printf("Chat message from %s in room %s: %s\n", userName, roomID, safeMessage)
 	return fmt.Sprintf("Message sent: %s", msg.ID)
@@ -1250,7 +1262,12 @@ func (a *App) StartHTTPServer(port string) {
 	http.HandleFunc("/api/sse", corsMiddleware(a.handleSSE))
 
 	fmt.Printf("Starting HTTP server on port %s\n", port)
-	go http.ListenAndServe(":"+port, nil)
+	listener, err := net.Listen("tcp4", "0.0.0.0:"+port)
+	if err != nil {
+		fmt.Printf("Failed to listen on port %s: %v\n", port, err)
+		return
+	}
+	go http.Serve(listener, nil)
 }
 
 // RequestJoinRoom handles a user requesting to join a room

@@ -24,10 +24,6 @@ func (a *App) handleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "GET" {
-		if _, err := a.authenticateRequest(r); err != nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
 		users := a.ListAllUsers()
 		json.NewEncoder(w).Encode(users)
 		return

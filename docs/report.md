@@ -86,6 +86,18 @@ go func() {
         a.sseManager.broadcastEvent(event)
     }
 }()
+
+// sse.go lines 46-50, 31-35
+type SSEManager struct {
+    clients map[string]*SSEClient
+    mu      sync.RWMutex
+}
+
+type SSEEvent struct {
+    Type      SSEEventType `json:"type"`
+    Data      interface{}  `json:"data"`
+    Timestamp int64        `json:"timestamp"`
+}
 ```
 
 **技巧應用**：
@@ -107,6 +119,21 @@ func (a *App) startup(ctx context.Context) {
         server.ListenAndServe()
     }()
 }
+
+// handlers.go lines 16-35
+func (a *App) handleUsers(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    w.Header().Set("Access-Control-Allow-Origin", "*")
+    
+    if r.Method == "POST" {
+        var req CreateUserRequest
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            http.Error(w, "Invalid JSON", http.StatusBadRequest)
+            return
+        }
+        // ... 處理請求
+    }
+}
 ```
 
 **技巧應用**：
@@ -115,16 +142,75 @@ func (a *App) startup(ctx context.Context) {
 - CORS 設定支援跨域請求
 - 中介軟體模式處理共用邏輯
 
+### 網路客戶端與重試機制
+
+實現與中央伺服器的通訊，包含重試邏輯：
+
+```go
+// network.go lines 20-25, 39-70
+type NetworkClient struct {
+    serverURL  string
+    httpClient *http.Client
+    connected  bool
+    mu         sync.RWMutex
+}
+
+func (n *NetworkClient) ConnectToServer() error {
+    const maxRetries = 3
+    const retryDelay = 2 * time.Second
+    
+    for attempt := 1; attempt <= maxRetries; attempt++ {
+        req, err := http.NewRequest("GET", n.serverURL+"/api/users", nil)
+        ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+        req = req.WithContext(ctx)
+        resp, err := n.httpClient.Do(req)
+        cancel()
+        
+        if err == nil && resp.StatusCode == http.StatusOK {
+            n.connected = true
+            return nil
+        }
+        
+        if attempt < maxRetries {
+            time.Sleep(retryDelay)
+        }
+    }
+    return fmt.Errorf("failed to connect after retries")
+}
+```
+
+**技巧應用**：
+- context.Context 控制請求超時
+- 指數退避重試策略
+- 同步保護連線狀態
+
 ### 資料結構與同步機制
 
 使用 map 與 slice 管理動態資料，並配合同步原語：
 
 ```go
+// app.go lines 301-320
 type App struct {
     users    map[string]*User
     rooms    map[string]*Room
     mu       sync.RWMutex
     // ...
+}
+
+// types.go lines 11-16, 19-25
+type User struct {
+    ID       string  `json:"id"`
+    Name     string  `json:"name"`
+    RoomID   *string `json:"roomId,omitempty"` // nil if not in any room
+    IsOnline bool    `json:"isOnline"`
+}
+
+type Room struct {
+    ID              string   `json:"id"`
+    Name            string   `json:"name"`
+    OwnerID         string   `json:"ownerId"`
+    UserIDs         []string `json:"userIds"`
+    ApprovedUserIDs []string `json:"approvedUserIds"`
 }
 ```
 
@@ -133,54 +219,175 @@ type App struct {
 - 記憶體池模式管理歷史記錄
 - 垃圾回收優化記憶體使用
 
-### 介面導向設計
+### 操作歷史與雜湊鏈
 
-Go 的隱式介面實現用於抽象：
+實現類似 Git 的操作歷史追蹤：
 
 ```go
-type ClipboardHelper interface {
-    ReadText() (string, error)
-    WriteText(text string) error
-    // ...
+// types.go lines 69-79
+type Operation struct {
+    ID         string        `json:"id"`
+    ParentID   string        `json:"parentId"`
+    ParentHash string        `json:"parentHash,omitempty"`
+    Hash       string        `json:"hash"`
+    OpType     OperationType `json:"opType"`
+    ItemID     string        `json:"itemId"`
+    Item       *Item         `json:"item,omitempty"`
+    Timestamp  int64         `json:"timestamp"`
+    UserID     string        `json:"userId,omitempty"`
+    UserName   string        `json:"userName,omitempty"`
+}
+
+// app.go lines 50-80
+func (hp *HistoryPool) AddOperation(roomID string, opType OperationType, itemID string, item *Item, userID, userName string) *Operation {
+    hp.mu.Lock()
+    defer hp.mu.Unlock()
+    
+    // 計算操作雜湊
+    hash := computeOperationHash(parentHash, opType, itemID, item, userID, userName, timestamp)
+    
+    op := &Operation{
+        ID:         fmt.Sprintf("op_%d", hp.counter),
+        ParentID:   parentID,
+        ParentHash: parentHash,
+        Hash:       hash,
+        // ... 其他欄位
+    }
+    
+    hp.operations[roomID] = append(hp.operations[roomID], op)
+    hp.enforceLimits(roomID)
+    return op
 }
 ```
 
 **技巧應用**：
-- 介面定義行為契約
-- 依賴注入提高可測試性
-- 多型實現跨平台支援
+- SHA256 雜湊確保操作完整性
+- 父子鏈結構追蹤操作歷史
+- 記憶體限制防止無限增長
 
-### 錯誤處理與資源管理
+### 跨平台剪貼簿操作
 
-Go 的慣用錯誤處理模式：
+專案實現了跨平台的剪貼簿讀寫功能：
 
 ```go
-func (a *App) CreateUser(name string) (*User, error) {
-    if name == "" {
-        return nil, errors.New("name cannot be empty")
+// clip_helper/clipboard.go lines 17-28
+type ClipboardItem struct {
+    Type    ClipboardItemType `json:"type"`
+    Text    string            `json:"text,omitempty"`
+    Image   []byte            `json:"image,omitempty"`
+    Files   []string          `json:"files,omitempty"`
+    // ... 其他欄位
+}
+
+// clip_helper/clipboard_darwin.go lines 13-50
+func ReadClipboard() (*ClipboardItem, error) {
+    // 初始化剪貼簿
+    err := clipboard.Init()
+    if err != nil {
+        return nil, fmt.Errorf("failed to initialize clipboard: %w", err)
+    }
+
+    // 優先檢查檔案
+    if filePaths := getFilePathsFromPasteboard(); len(filePaths) > 0 {
+        return &ClipboardItem{
+            Type:  ClipboardFile,
+            Files: filePaths,
+            Text:  fmt.Sprintf("%d files selected", len(filePaths)),
+        }, nil
+    }
+
+    // 檢查圖片
+    if imgData := clipboard.Read(clipboard.FmtImage); len(imgData) > 0 {
+        return &ClipboardItem{
+            Type:  ClipboardImage,
+            Image: imgData,
+        }, nil
+    }
+
+    // 檢查文字
+    if textData := clipboard.Read(clipboard.FmtText); len(textData) > 0 {
+        return &ClipboardItem{
+            Type: ClipboardText,
+            Text: string(textData),
+        }, nil
     }
     // ...
 }
 ```
 
 **技巧應用**：
-- 多返回值包含錯誤資訊
-- defer 語句確保資源清理
-- panic/recover 處理異常情況
+- 平台特定的實現檔案（darwin, windows, other）
+- 統一的資料結構抽象不同剪貼簿內容
+- 檔案、圖片、文字等多媒體支援
 
-### 嵌入資源與建構優化
+### 錯誤處理與資源管理
 
-使用 Go 1.16+ 的嵌入功能：
+Go 的慣用錯誤處理模式：
 
 ```go
-//go:embed all:frontend/dist
-var assets embed.FS
+// app.go lines 747-767
+func (a *App) CreateUser(name string) *User {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+
+    cleanName := sanitizeUserName(name)
+    if cleanName == "" {
+        cleanName = fmt.Sprintf("User %d", a.userCounter+1)
+    }
+
+    // 產生使用者 ID
+    a.userCounter++
+    userID := fmt.Sprintf("user_%d", a.userCounter)
+    user := &User{
+        ID:   userID,
+        Name: cleanName,
+    }
+    a.users[user.ID] = user
+    return user
+}
 ```
 
 **技巧應用**：
-- 編譯時嵌入靜態資源
-- 單一二進位檔案部署
-- 減少執行時依賴
+- defer 語句確保資源清理
+- 互斥鎖保護共享狀態
+- 輸入清理與預設值處理
+
+### 應用程式入口與框架整合
+
+專案使用 Wails 框架整合 Go 後端與前端，實現跨平台桌面應用：
+
+```go
+// main.go lines 14-55
+//go:embed all:frontend/dist
+var assets embed.FS
+
+func main() {
+	mode := flag.String("mode", "client", "Mode: 'host' for central-server host or 'client' for central-server client")
+	flag.Parse()
+
+	app := NewApp(*mode)
+
+	err := wails.Run(&options.App{
+		Title:  "GOproject",
+		Width:  1024,
+		Height: 768,
+		AssetServer: &assetserver.Options{
+			Assets: assets,
+		},
+		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
+		Frameless:        true,
+		OnStartup: app.startup,
+		Bind: []interface{}{
+			app,
+		},
+	})
+}
+```
+
+**技巧應用**：
+- `//go:embed` 指令編譯時嵌入前端資源
+- Wails 框架提供 Go 與 JavaScript 互操作
+- 命令列參數解析選擇運作模式
 
 ## 結論
 

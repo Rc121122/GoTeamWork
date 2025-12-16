@@ -47,7 +47,7 @@ go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/GoTeamWork.git
+git clone https://github.com/Rc121122/GoTeamWork.git
 cd GoTeamWork
 ```
 
@@ -226,3 +226,8 @@ For issues and questions:
 - Check the [API documentation](docs/ApiMethod.md)
 - Review [design documentation](docs/design.md)
 - Open an issue on GitHub
+
+
+### special case
+codesign --force --deep --sign - GOproject.app
+open /Applications/GOproject.app --args --mode host

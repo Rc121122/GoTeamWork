@@ -5,12 +5,14 @@ go 1.24
 require (
 	github.com/go-vgo/robotgo v0.110.8
 	github.com/golang-jwt/jwt/v5 v5.2.1
+	github.com/grandcat/zeroconf v1.0.0
 	github.com/wailsapp/wails/v2 v2.10.2
 	golang.design/x/clipboard v0.7.1
 )
 
 require (
 	github.com/bep/debounce v1.2.1 // indirect
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240820181039-f2b84150679e // indirect
 	github.com/ebitengine/purego v0.8.3 // indirect
 	github.com/gen2brain/shm v0.1.1 // indirect
@@ -29,6 +31,7 @@ require (
 	github.com/lufia/plan9stats v0.0.0-20250317134145-8bc96cf8fc35 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/miekg/dns v1.1.27 // indirect
 	github.com/otiai10/gosseract v2.2.1+incompatible // indirect
 	github.com/otiai10/mint v1.6.3 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect

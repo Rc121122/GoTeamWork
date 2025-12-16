@@ -8,7 +8,7 @@ WindowStartState: options.Normal,
 Frameless:        true, // 无边框窗口
 Windows: &windows.Options{
     WebviewIsTransparent: true, // WebView 透明
-    WindowIsTranslucent: true, // 窗口半透明
+    WindowIsTranslucent: true, // 窗口半透明，建議false
     DisableFramelessWindowDecorations: true, // 禁用窗口装饰
 },
 ```
@@ -17,7 +17,7 @@ Windows: &windows.Options{
 ```go
 Mac: &mac.Options{
     WebviewIsTransparent: true,
-    WindowIsTranslucent:  true,
+    WindowIsTranslucent:  true, // 有時會不透明，建議false
 },
 ```
 
