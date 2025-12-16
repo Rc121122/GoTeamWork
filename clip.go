@@ -52,10 +52,11 @@ func (a *App) StartClipboardMonitor() {
 // handleClipboardCopy processes a copied clipboard item
 func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 	if item == nil {
+		fmt.Println("handleClipboardCopy: item is nil")
 		return
 	}
 
-	fmt.Printf("Clipboard copied: type=%s\n", item.Type)
+	fmt.Printf("handleClipboardCopy: processing item type=%s\n", item.Type)
 
 	if item.Type == clip_helper.ClipboardText {
 		item.Text = sanitizeClipboardText(item.Text)
@@ -67,6 +68,7 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 
 	// Check file sizes for file clipboard items
 	if item.Type == clip_helper.ClipboardFile && len(item.Files) > 0 {
+		fmt.Printf("Checking %d files...\n", len(item.Files))
 		const maxIndividualFileSize = 10 * 1024 * 1024 * 1024 // 10GB per file
 		const maxTotalFiles = 100                             // Maximum 100 files
 
@@ -95,15 +97,18 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 	// To fit, perhaps add to a global room or modify.
 
 	if a.Mode == "client" {
+		fmt.Println("Client mode: uploading clipboard item")
 		// Upload to server
 		op, err := a.networkClient.UploadClipboardItem(item, a.currentUser.ID, a.currentUser.Name)
 		if err != nil {
 			fmt.Printf("Failed to upload clipboard item: %v\n", err)
 			return
 		}
+		fmt.Printf("Upload successful, op ID: %s\n", op.ID)
 
 		// If file, start async zip
 		if item.Type == clip_helper.ClipboardFile && item.ZipFilePath == "" && len(item.Files) > 0 {
+			fmt.Println("Starting async zip/process for client")
 			go a.processFileZip("global", op.ItemID, item, op.ID)
 		}
 		return
@@ -111,10 +116,12 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 
 	// Host logic: require room
 	if a.currentUser.RoomID == nil {
+		fmt.Println("Host mode: not in a room, cannot share")
 		// Host not in a room, cannot share
 		return
 	}
 	roomID := *a.currentUser.RoomID
+	fmt.Printf("Host mode: sharing to room %s\n", roomID)
 
 	// Create item ID
 	itemID := fmt.Sprintf("clip_%d", time.Now().UnixNano())
@@ -438,6 +445,9 @@ func startWindowsFilePoller(ctx context.Context, cb func(*clip_helper.ClipboardI
 				lastDetectionTime = now
 				lastFilePathsHash = currentHash
 				x, y := getMousePosition()
+				// Emit HUD first (nil item triggers HUD display)
+				cb(nil, x, y)
+				// Then provide the item
 				cb(item, x, y)
 			}
 		}
@@ -530,15 +540,21 @@ func (a *App) consumePendingClipboardItem() *clip_helper.ClipboardItem {
 // ShareSystemClipboard publishes the most recent clipboard capture.
 // If the cached value expired, it re-reads the live clipboard as a fallback.
 func (a *App) ShareSystemClipboard() (bool, error) {
+	fmt.Println("ShareSystemClipboard called")
 	item := a.consumePendingClipboardItem()
 	if item == nil {
+		fmt.Println("No pending item or expired, reading from clipboard directly")
 		var err error
 		item, err = clip_helper.ReadClipboard()
 		if err != nil {
+			fmt.Printf("Failed to read clipboard: %v\n", err)
 			return false, err
 		}
+	} else {
+		fmt.Println("Using pending clipboard item")
 	}
 
+	fmt.Printf("Processing clipboard item: Type=%s, Files=%d\n", item.Type, len(item.Files))
 	a.handleClipboardCopy(item)
 	return true, nil
 }

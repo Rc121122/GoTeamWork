@@ -33,6 +33,7 @@ function App() {
   const [inviterExpiresAt, setInviterExpiresAt] = useState<number>(0);
   const [timeLeft, setTimeLeft] = useState(0);
   const [isHUDEnabled, setIsHUDEnabled] = useState(true);
+  const [mainWindowSize, setMainWindowSize] = useState({ width: 1024, height: 768 });
 
   const HUD_WINDOW_WIDTH = 160;
   const HUD_WINDOW_HEIGHT = 160;
@@ -45,10 +46,16 @@ function App() {
     WindowSetSize(HUD_WINDOW_WIDTH, HUD_WINDOW_HEIGHT);
     WindowSetPosition(targetX, targetY);
     WindowShow();
-    //delay here
-    setTimeout(() => {
+    
+    // Aggressively set AlwaysOnTop with multiple retries for Windows reliability
+    const setAlwaysOnTopRetry = () => {
       WindowSetAlwaysOnTop(true);
-    }, 100);
+      setTimeout(() => WindowSetAlwaysOnTop(true), 50);
+      setTimeout(() => WindowSetAlwaysOnTop(true), 100);
+      setTimeout(() => WindowSetAlwaysOnTop(true), 200);
+      setTimeout(() => WindowSetAlwaysOnTop(true), 500);
+    };
+    setAlwaysOnTopRetry();
   };
 
   // Timer effect
@@ -188,7 +195,8 @@ function App() {
     const closeHUD = () => {
       setIsHUD(false);
       WindowSetAlwaysOnTop(false);
-      WindowSetSize(1024, 768); // Restore default size
+      // Restore main window size
+      WindowSetSize(mainWindowSize.width, mainWindowSize.height);
       WindowCenter();
     };
 

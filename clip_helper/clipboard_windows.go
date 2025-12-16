@@ -66,8 +66,8 @@ static char** GetClipboardFilePaths() {
 */
 import "C"
 
-// getFilePathsFromClipboard reads file paths from Windows clipboard using CF_HDROP
-func getFilePathsFromClipboard() []string {
+// GetFilePathsFromClipboard reads file paths from Windows clipboard using CF_HDROP
+func GetFilePathsFromClipboard() []string {
 	pathsPtr := C.GetClipboardFilePaths()
 	if pathsPtr == nil {
 		return nil
@@ -99,14 +99,8 @@ func getFilePathsFromClipboard() []string {
 
 // ReadClipboard reads the current clipboard content and returns a ClipboardItem
 func ReadClipboard() (*ClipboardItem, error) {
-	// Initialize clipboard if needed
-	err := clipboard.Init()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize clipboard: %w", err)
-	}
-
 	// Try to read as file paths from Windows clipboard
-	if filePaths := getFilePathsFromClipboard(); len(filePaths) > 0 {
+	if filePaths := GetFilePathsFromClipboard(); len(filePaths) > 0 {
 		return &ClipboardItem{
 			Type:  ClipboardFile,
 			Files: filePaths,

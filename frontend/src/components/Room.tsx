@@ -485,7 +485,10 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
           {messages.map(msg => (
             <div key={msg.id} className={`chat-bubble ${msg.userId === currentUser.id ? 'chat-bubble-me' : 'chat-bubble-other'}`}>
               {msg.userId === currentUser.id ? (
-                <div className="chat-message">{msg.message}</div>
+                <div>
+                  <div className="chat-sender" style={{ textAlign: 'right' }}>You</div>
+                  <div className="chat-message">{msg.message}</div>
+                </div>
               ) : (
                 <div>
                   <div className="chat-sender">{msg.userName}</div>
