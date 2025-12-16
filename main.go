@@ -34,12 +34,12 @@ func main() {
 		Frameless:        true,
 		Mac: &mac.Options{
 			WebviewIsTransparent: true,
-			WindowIsTranslucent:  false,
+			WindowIsTranslucent:  true,
 			TitleBar:             mac.TitleBarHiddenInset(),
 		},
 		Windows: &windows.Options{
 			WebviewIsTransparent: true,
-			WindowIsTranslucent:  false,
+			WindowIsTranslucent:  true,
 
 		},
 		OnStartup: app.startup,
