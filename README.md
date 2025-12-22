@@ -147,17 +147,8 @@ By default (no flags), the app starts and prompts you to choose **Host** or **Cl
 .\build\bin\GOproject.exe
 ```
 
-#### Linux
-```bash
-# Host mode
-./build/bin/GOproject --mode host
-
-# Client mode
-./build/bin/GOproject --mode client
-
-# Prompt for mode (default)
-./build/bin/GOproject
-```
+#### Linux (Not Supported Yet)
+Linux builds are not yet available. Support for Linux will be added in a future release.
 
 ### Development Mode
 ```bash
