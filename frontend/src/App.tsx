@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getAppMode } from './api/wailsBridge';
+import { getAppMode, setAppMode as setBackendMode } from './api/wailsBridge';
 import { EventsOn, WindowSetPosition, WindowSetSize, WindowShow, WindowSetAlwaysOnTop, WindowCenter, WindowUnmaximise, WindowReload } from '../wailsjs/runtime/runtime';
 import { GetClipboardType, SetPendingClipboardFiles, SaveDroppedFiles, ShareSystemClipboard } from '../wailsjs/go/main/App';
 import HUD from './components/HUD';
 import Sidebar from './components/Sidebar';
 import LandingPage from './components/LandingPage';
+import ModeSelect from './components/ModeSelect';
 import NewUserPage from './components/NewUserPage';
 import Lobby from './components/Lobby';
 import RoomView from './components/Room';
@@ -19,7 +20,7 @@ import { hostApproveJoin } from './api/wailsBridge';
 import './app.css';
 
 function App() {
-  const [appMode, setAppMode] = useState<'host' | 'client'>('client');
+  const [appMode, setAppModeState] = useState<'host' | 'client' | 'pending'>('pending');
   const [state, setState] = useState<AppState>('LOADING');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
@@ -175,16 +176,20 @@ function App() {
 
   useEffect(() => {
     getAppMode().then((mode) => {
-      setAppMode(mode as 'host' | 'client');
       if (mode === 'host') {
+        setAppModeState('host');
         setState('HOST_DASHBOARD');
-      } else {
+      } else if (mode === 'client') {
+        setAppModeState('client');
         setState('LANDING');
+      } else {
+        setAppModeState('pending');
+        setState('MODE_SELECT');
       }
     }).catch((err) => {
         console.error("Failed to get app mode", err);
-        setAppMode('client');
-        setState('LANDING');
+        setAppModeState('pending');
+        setState('MODE_SELECT');
     });
   }, []);
 
@@ -459,6 +464,20 @@ function App() {
     setState('NEW_USER');
   };
 
+  const handleSelectMode = async (mode: 'host' | 'client') => {
+    try {
+      await setBackendMode(mode);
+      setAppModeState(mode);
+      if (mode === 'host') {
+        setState('HOST_DASHBOARD');
+      } else {
+        setState('LANDING');
+      }
+    } catch (err) {
+      console.error('Failed to set app mode', err);
+    }
+  };
+
   const handleUserCreated = (user: { id: string; name: string }) => {
     setCurrentUser({ ...user, roomId: null, isOnline: true });
     setState('LOBBY');
@@ -503,6 +522,15 @@ function App() {
   // When HUD is active, render ONLY the HUD with solid background
   if (isHUD) {
     return <HUD onClose={closeHUD} contentType={hudContentType} />;
+  }
+
+  if (state === 'MODE_SELECT') {
+    return (
+      <div className="app-container">
+        <TitleBar />
+        <ModeSelect onSelect={handleSelectMode} />
+      </div>
+    );
   }
 
   return (

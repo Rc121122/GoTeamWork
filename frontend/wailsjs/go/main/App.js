@@ -86,6 +86,10 @@ export function SendChatMessage(arg1, arg2, arg3) {
   return window['go']['main']['App']['SendChatMessage'](arg1, arg2, arg3);
 }
 
+export function SetMode(arg1) {
+  return window['go']['main']['App']['SetMode'](arg1);
+}
+
 export function SetPendingClipboardFiles(arg1) {
   return window['go']['main']['App']['SetPendingClipboardFiles'](arg1);
 }

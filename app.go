@@ -39,6 +39,51 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
+// initializeMode performs one-time setup for the chosen mode.
+func (a *App) initializeMode(mode string) error {
+	if mode != "host" && mode != "client" {
+		return fmt.Errorf("invalid mode: %s", mode)
+	}
+	if a.modeInitialized {
+		return nil
+	}
+
+	a.Mode = mode
+	a.modeInitialized = true
+
+	fmt.Printf("Starting in %s mode\n", a.Mode)
+
+	// Initialize with a default current user for host mode
+	if a.Mode == "host" {
+		a.currentUser = &User{
+			ID:       "host",
+			Name:     "Host Server",
+			IsOnline: true,
+		}
+
+		// Start HTTP server for central server functionality
+		a.StartHTTPServer("8080")
+
+		// Register zeroconf service for discovery
+		server, err := zeroconf.Register("GoTeamWork", "_http._tcp", "local.", 8080, []string{"version=1.0"}, nil)
+		if err != nil {
+			fmt.Printf("Failed to register zeroconf service: %v\n", err)
+		} else {
+			a.zeroconfServer = server
+			fmt.Println("Zeroconf service registered for discovery")
+		}
+
+		// Start cleanup goroutines for host mode
+		go a.startCleanupTasks(a.ctx)
+	} else if a.Mode == "client" {
+		// Initialize network client for client mode (URL will be set when user connects)
+		a.networkClient = NewNetworkClient("")
+		fmt.Println("Client mode initialized. Please enter server address to connect.")
+	}
+
+	return nil
+}
+
 // NewHistoryPool creates a new history pool
 func NewHistoryPool() *HistoryPool {
 	return &HistoryPool{
@@ -302,6 +347,7 @@ func (hp *HistoryPool) GetCurrentClipboardItems(roomID string) []*clip_helper.Cl
 type App struct {
 	ctx            context.Context
 	Mode           string
+	modeInitialized bool
 	users          map[string]*User
 	rooms          map[string]*Room
 	currentUser    *User
@@ -353,6 +399,11 @@ func NewApp(mode string) *App {
 		}
 	}
 
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "host" && mode != "client" {
+		mode = "pending"
+	}
+
 	app := &App{
 		Mode:           mode,
 		users:          make(map[string]*User),
@@ -362,20 +413,6 @@ func NewApp(mode string) *App {
 		sseManager:     NewSSEManager(),
 		jwtSecret:      []byte(secret),
 		useFastTar:     os.Getenv("FAST_TAR") == "true", // Enable fast tar for large files
-	}
-
-	// Initialize with a default current user for host mode
-	// Note: host user is NOT added to users map, so it won't appear in user lists
-	if mode == "host" {
-		app.currentUser = &User{
-			ID:       "host",
-			Name:     "Host Server",
-			IsOnline: true,
-		}
-		// DO NOT add host to users map - host is not a regular user
-		// Host manages the server but doesn't participate in rooms
-	} else if mode == "client" {
-		// Client mode will set currentUser when user logs in
 	}
 
 	return app
@@ -395,28 +432,12 @@ func (a *App) startup(ctx context.Context) {
 	}
 	fmt.Printf("Temp directory created: %s\n", a.tempDir)
 
-	fmt.Printf("Starting in %s mode\n", a.Mode)
-
-	// Host startup tasks
-	if a.Mode == "host" {
-		// Start HTTP server for central server functionality
-		a.StartHTTPServer("8080")
-
-		// Register zeroconf service for discovery
-		server, err := zeroconf.Register("GoTeamWork", "_http._tcp", "local.", 8080, []string{"version=1.0"}, nil)
-		if err != nil {
-			fmt.Printf("Failed to register zeroconf service: %v\n", err)
-		} else {
-			a.zeroconfServer = server
-			fmt.Println("Zeroconf service registered for discovery")
+	if a.Mode == "host" || a.Mode == "client" {
+		if err := a.initializeMode(a.Mode); err != nil {
+			fmt.Printf("Failed to initialize mode %s: %v\n", a.Mode, err)
 		}
-
-		// Start cleanup goroutines for host mode
-		go a.startCleanupTasks(ctx)
-	} else if a.Mode == "client" {
-		// Initialize network client for client mode (URL will be set when user connects)
-		a.networkClient = NewNetworkClient("")
-		fmt.Println("Client mode initialized. Please enter server address to connect.")
+	} else {
+		fmt.Println("Mode pending; waiting for user selection")
 	}
 
 	// Start clipboard monitoring for copy hotkey
@@ -835,6 +856,25 @@ func (a *App) GetAllRooms() []*Room {
 // GetMode returns the current application mode
 func (a *App) GetMode() string {
 	return a.Mode
+}
+
+// SetMode sets the application mode (host/client) once and initializes mode-specific services.
+func (a *App) SetMode(mode string) (string, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "host" && mode != "client" {
+		return a.Mode, fmt.Errorf("invalid mode: %s", mode)
+	}
+	if a.modeInitialized {
+		if a.Mode == mode {
+			return a.Mode, nil
+		}
+		return a.Mode, fmt.Errorf("mode already initialized as %s", a.Mode)
+	}
+
+	if err := a.initializeMode(mode); err != nil {
+		return a.Mode, err
+	}
+	return a.Mode, nil
 }
 
 // GetConnectionStatus returns whether the client is connected to the server

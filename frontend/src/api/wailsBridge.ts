@@ -4,6 +4,7 @@ import {
   GetAllRooms,
   GetChatHistory,
   GetMode,
+  SetMode,
   GetOperations,
   Invite,
   JoinRoom,
@@ -50,7 +51,15 @@ export async function getAppMode(): Promise<AppMode> {
   if (mode === "host" || mode === "client") {
     return mode;
   }
-  return "client";
+  return "pending";
+}
+
+export async function setAppMode(mode: AppMode): Promise<AppMode> {
+  const next = await SetMode(mode as any);
+  if (next === "host" || next === "client") {
+    return next as AppMode;
+  }
+  return "pending";
 }
 
 export async function hostListUsers(): Promise<User[]> {

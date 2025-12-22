@@ -119,6 +119,8 @@ The built application will be in `build/bin/` directory.
 
 ### Running the Application
 
+By default (no flags), the app starts and prompts you to choose **Host** or **Client** in the UI. You can still force a mode via the `--mode` flag if you prefer CLI control.
+
 #### macOS
 ```bash
 # Host mode
@@ -126,7 +128,12 @@ The built application will be in `build/bin/` directory.
 
 # Client mode
 ./build/bin/GOproject.app/Contents/MacOS/GOproject --mode client
+
+# Prompt for mode (default)
+./build/bin/GOproject.app/Contents/MacOS/GOproject
 ```
+
+> Note: The app is not code-signed. On first launch, you may need to bypass Gatekeeper by right-clicking the app → Open (or System Settings → Privacy & Security → Open Anyway). If it was quarantined, clear the flag with `xattr -cr build/bin/GOproject.app`.
 
 #### Windows
 ```bash
@@ -135,6 +142,9 @@ The built application will be in `build/bin/` directory.
 
 # Client mode
 .\build\bin\GOproject.exe --mode client
+
+# Prompt for mode (default)
+.\build\bin\GOproject.exe
 ```
 
 #### Linux
@@ -144,6 +154,9 @@ The built application will be in `build/bin/` directory.
 
 # Client mode
 ./build/bin/GOproject --mode client
+
+# Prompt for mode (default)
+./build/bin/GOproject
 ```
 
 ### Development Mode
@@ -242,6 +255,8 @@ go test ./...
 ### Code Signing (macOS)
 ```bash
 codesign --force --deep --sign - GOproject.app
+#or
+xattr -crw GOproject.app
 ```
 
 ### Troubleshooting
