@@ -1,4 +1,4 @@
-# 一、 書面報告 (Final Report)
+# 書面報告 (Final Report)
 
 ## 1. 專案概述 (Project Overview)
 
