@@ -14,5 +14,6 @@
     "companyName": "GoTeamWork",
     "productName": "GOproject",
     "productVersion": "1.0.0"
-  }
+  },
+  "icon": "go_icons/app_icon.png"
 }

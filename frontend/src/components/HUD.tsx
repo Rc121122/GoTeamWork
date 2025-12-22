@@ -1,14 +1,19 @@
 import React from 'react';
-import gopherIdle from '../assets/gopher/gopher-idle.png';
+import gopherOriginal from '../assets/gopher/gopher_original.png';
+import gopherText from '../assets/gopher/gopher_text.png';
+import gopherImage from '../assets/gopher/gopher_image.png';
+import gopherFolder from '../assets/gopher/gopher_folder.png';
 import gopherCarry from '../assets/gopher/gopher-carry.png';
 import { ShareSystemClipboard } from '../../wailsjs/go/main/App';
 
 interface HUDProps {
   onClose: () => void;
+  contentType?: string;
 }
 
-const HUD: React.FC<HUDProps> = ({ onClose }) => {
+const HUD: React.FC<HUDProps> = ({ onClose, contentType = 'text' }) => {
   const [state, setState] = React.useState<'idle' | 'carry'>('idle');
+  const [showNotification, setShowNotification] = React.useState(false);
 
   // Set body background to transparent when HUD mounts
   React.useEffect(() => {
@@ -26,6 +31,17 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
     return () => clearTimeout(timer);
   }, [onClose]);
 
+  const getIconForContentType = (type: string, state: 'idle' | 'carry') => {
+    if (state === 'carry') return gopherCarry;
+    
+    switch (type) {
+      case 'text': return gopherText;
+      case 'image': return gopherImage;
+      case 'file': return gopherFolder;
+      default: return gopherOriginal;
+    }
+  };
+
   const handleClick = async () => {
     if (state === 'idle') {
       try {
@@ -33,7 +49,13 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
         setState('carry');
         await ShareSystemClipboard();
         console.log("ShareSystemClipboard done");
-        onClose();
+        
+        // Show notification
+        setShowNotification(true);
+        setTimeout(() => setShowNotification(false), 2000);
+        
+        // Close after a brief delay to show the notification
+        setTimeout(() => onClose(), 1000);
       } catch (err) {
         console.error("Error sharing clipboard:", err);
         onClose();
@@ -60,12 +82,39 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
         // WebkitAppRegion: 'drag', // Allow dragging
       }}>
       <img 
-        src={state === 'idle' ? gopherIdle : gopherCarry} 
+        src={getIconForContentType(contentType, state)} 
         alt="Gopher" 
         style={{ width: '40px', cursor: 'pointer', marginLeft: '100px', WebkitAppRegion: 'no-drag', opacity: 0.9 } as React.CSSProperties} 
         onMouseDown={(e) => e.stopPropagation()}
         onClick={handleClick}
       />
+      
+      {/* Item shared notification */}
+      {showNotification && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          background: 'rgba(0, 0, 0, 0.8)',
+          color: 'white',
+          padding: '8px 16px',
+          borderRadius: '4px',
+          fontSize: '14px',
+          fontWeight: 'bold',
+          zIndex: 10000,
+          animation: 'fadeIn 0.3s ease-in-out'
+        }}>
+          Item shared!
+        </div>
+      )}
+      
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translate(-50%, -60%); }
+          to { opacity: 1; transform: translate(-50%, -50%); }
+        }
+      `}</style>
     </div>
   );
 };

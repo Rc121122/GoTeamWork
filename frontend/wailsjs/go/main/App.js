@@ -30,6 +30,10 @@ export function GetClipboardItem() {
   return window['go']['main']['App']['GetClipboardItem']();
 }
 
+export function GetClipboardType() {
+  return window['go']['main']['App']['GetClipboardType']();
+}
+
 export function GetConnectionStatus() {
   return window['go']['main']['App']['GetConnectionStatus']();
 }

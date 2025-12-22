@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getAppMode } from './api/wailsBridge';
 import { EventsOn, WindowSetPosition, WindowSetSize, WindowShow, WindowSetAlwaysOnTop, WindowCenter, WindowUnmaximise, WindowReload } from '../wailsjs/runtime/runtime';
+import { GetClipboardType } from '../wailsjs/go/main/App';
 import HUD from './components/HUD';
 import Sidebar from './components/Sidebar';
 import LandingPage from './components/LandingPage';
@@ -33,6 +34,7 @@ function App() {
   const [inviterExpiresAt, setInviterExpiresAt] = useState<number>(0);
   const [timeLeft, setTimeLeft] = useState(0);
   const [isHUDEnabled, setIsHUDEnabled] = useState(true);
+  const [hudContentType, setHudContentType] = useState<string>('text');
   const [mainWindowSize, setMainWindowSize] = useState({ width: 1024, height: 768 });
 
   const HUD_WINDOW_WIDTH = 160;
@@ -111,7 +113,7 @@ function App() {
 
   useEffect(() => {
     // Listen for HUD trigger
-    const cancelListener = EventsOn("clipboard:show-share-button", (data: { screenX: number, screenY: number }) => {
+    const cancelListener = EventsOn("clipboard:show-share-button", async (data: { screenX: number, screenY: number }) => {
         if (appMode === 'host') {
             console.log("HUD ignored in host mode");
             return;
@@ -122,6 +124,17 @@ function App() {
         }
 
         console.log("HUD Triggered", data);
+        
+        // Get clipboard content type
+        try {
+            const contentType = await GetClipboardType();
+            console.log("Clipboard type:", contentType);
+            setHudContentType(contentType);
+        } catch (err) {
+            console.error("Failed to get clipboard type:", err);
+            setHudContentType('text'); // fallback
+        }
+        
         setIsHUD(true);
         showHudAtCursor(data);
     });
@@ -252,7 +265,7 @@ function App() {
 
   // When HUD is active, render ONLY the HUD with solid background
   if (isHUD) {
-    return <HUD onClose={closeHUD} />;
+    return <HUD onClose={closeHUD} contentType={hudContentType} />;
   }
 
   return (

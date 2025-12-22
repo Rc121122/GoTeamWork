@@ -17,6 +17,8 @@ export function GetChatHistory(arg1:string):Promise<Array<main.ChatMessage>>;
 
 export function GetClipboardItem():Promise<clip_helper.ClipboardItem>;
 
+export function GetClipboardType():Promise<string>;
+
 export function GetConnectionStatus():Promise<boolean>;
 
 export function GetCurrentRoom():Promise<main.Room>;

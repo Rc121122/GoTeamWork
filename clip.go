@@ -676,3 +676,12 @@ func (a *App) ShareSystemClipboard() (bool, error) {
 func (a *App) GetClipboardItem() (*clip_helper.ClipboardItem, error) {
 	return clip_helper.ReadClipboard()
 }
+
+// GetClipboardType returns the type of current clipboard content without reading the full content
+func (a *App) GetClipboardType() (string, error) {
+	item, err := clip_helper.ReadClipboard()
+	if err != nil {
+		return "", err
+	}
+	return string(item.Type), nil
+}
