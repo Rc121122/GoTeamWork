@@ -385,18 +385,21 @@ body {
     font-size: 0.9rem;
     line-height: 1.4;
     text-align: left;
+    white-space: pre-wrap;
 }
 
 .chat-bubble-me .chat-message {
     background: #1e293b;
     color: #e2e8f0;
     border-bottom-right-radius: 4px;
+    text-align: right;
 }
 
 .chat-bubble-other .chat-message {
     background: #0ea5e9;
     color: #ffffff;
     border-bottom-left-radius: 4px;
+    text-align: left;
 }
 
 .icon-btn {

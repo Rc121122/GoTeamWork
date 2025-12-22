@@ -322,9 +322,15 @@ type App struct {
 	pendingClipboardAt    time.Time
 
 	tempDir               string
+	useFastTar            bool // Use high-performance tar library for large files
+
+	// Timing for performance measurement
+	shareStartTime        time.Time
+	totalBytesTransferred int64
 
 	jwtSecret      []byte
 	zeroconfServer *zeroconf.Server
+	httpServer     *http.Server
 }
 
 const (
@@ -355,6 +361,7 @@ func NewApp(mode string) *App {
 		historyPool:    NewHistoryPool(),
 		sseManager:     NewSSEManager(),
 		jwtSecret:      []byte(secret),
+		useFastTar:     os.Getenv("FAST_TAR") == "true", // Enable fast tar for large files
 	}
 
 	// Initialize with a default current user for host mode
@@ -419,6 +426,34 @@ func (a *App) startup(ctx context.Context) {
 
 	// Start clipboard monitoring for copy hotkey
 	a.StartClipboardMonitor()
+}
+
+// shutdown is called when the app shuts down
+func (a *App) shutdown(ctx context.Context) {
+	fmt.Println("Shutting down GoTeamWork...")
+
+	// Clean up temp files
+	if a.tempDir != "" {
+		if err := os.RemoveAll(a.tempDir); err != nil {
+			fmt.Printf("Failed to clean temp dir on shutdown: %v\n", err)
+		} else {
+			fmt.Printf("Temp directory cleaned: %s\n", a.tempDir)
+		}
+	}
+
+	// Shutdown HTTP server if running
+	if a.httpServer != nil {
+		fmt.Println("Shutting down HTTP server...")
+		if err := a.httpServer.Shutdown(ctx); err != nil {
+			fmt.Printf("HTTP server shutdown error: %v\n", err)
+		}
+	}
+
+	// Shutdown zeroconf server if running
+	if a.zeroconfServer != nil {
+		fmt.Println("Shutting down zeroconf server...")
+		a.zeroconfServer.Shutdown()
+	}
 }
 
 // Greet returns a greeting for the given name

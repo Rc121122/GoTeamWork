@@ -1,8 +1,10 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -319,16 +321,34 @@ func TestTempDirectoryLargeFile(t *testing.T) {
 	}
 	op := app.historyPool.AddOperation(room.ID, OpAdd, itemID, histItem, user.ID, user.Name)
 
-	// Simulate zip upload (large file)
+	// Simulate archive upload (large file)
 	largeData := make([]byte, 1024*1024) // 1MB "large" file for test
 	for i := range largeData {
 		largeData[i] = byte(i % 256)
 	}
 
+	// Build a simple tar archive in-memory with one file
+	buf := new(bytes.Buffer)
+	tw := tar.NewWriter(buf)
+	hdr := &tar.Header{
+		Name: "payload.bin",
+		Mode: 0600,
+		Size: int64(len(largeData)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("failed to write tar header: %v", err)
+	}
+	if _, err := tw.Write(largeData); err != nil {
+		t.Fatalf("failed to write tar body: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("failed to close tar writer: %v", err)
+	}
+
 	// Create request to /api/clipboard/{opID}/zip
 	url := "/api/clipboard/" + op.ID + "/zip"
-	req := httptest.NewRequest(http.MethodPost, url, bytes.NewReader(largeData))
-	req.Header.Set("Content-Type", "application/zip")
+	req := httptest.NewRequest(http.MethodPost, url, bytes.NewReader(buf.Bytes()))
+	req.Header.Set("Content-Type", "application/x-tar")
 
 	rr := httptest.NewRecorder()
 	app.handleZipUpload(rr, req)
@@ -351,16 +371,14 @@ func TestTempDirectoryLargeFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read saved file: %v", err)
 	}
-	if len(savedData) != len(largeData) {
-		t.Fatalf("saved file size mismatch: expected %d, got %d", len(largeData), len(savedData))
+	if len(savedData) != len(buf.Bytes()) {
+		t.Fatalf("saved file size mismatch: expected %d, got %d", len(buf.Bytes()), len(savedData))
 	}
-	for i, b := range savedData {
-		if b != largeData[i] {
-			t.Fatalf("data mismatch at byte %d", i)
-		}
+	if !bytes.Equal(savedData, buf.Bytes()) {
+		t.Fatalf("saved archive bytes mismatch")
 	}
 
-	// Check that the item has ZipFilePath set
+	// Check that the item has ArchiveFilePath set
 	ops := app.historyPool.GetOperations(room.ID, "", "")
 	var targetOp *Operation
 	for _, o := range ops {
@@ -376,8 +394,8 @@ func TestTempDirectoryLargeFile(t *testing.T) {
 	if !ok {
 		t.Fatalf("invalid item data")
 	}
-	if clipItem.ZipFilePath != filePath {
-		t.Fatalf("ZipFilePath not set correctly: expected %s, got %s", filePath, clipItem.ZipFilePath)
+	if clipItem.ArchiveFilePath != filePath {
+		t.Fatalf("ArchiveFilePath not set correctly: expected %s, got %s", filePath, clipItem.ArchiveFilePath)
 	}
 
 	// Simulate download by another user
@@ -396,18 +414,24 @@ func TestTempDirectoryLargeFile(t *testing.T) {
 	}
 
 	// Check response headers
-	if rr2.Header().Get("Content-Type") != "application/zip" {
-		t.Fatalf("expected Content-Type application/zip, got %s", rr2.Header().Get("Content-Type"))
+	if rr2.Header().Get("Content-Type") != "application/x-tar" {
+		t.Fatalf("expected Content-Type application/x-tar, got %s", rr2.Header().Get("Content-Type"))
 	}
 
-	// Check response body
-	downloadedData := rr2.Body.Bytes()
-	if len(downloadedData) != len(largeData) {
-		t.Fatalf("downloaded data size mismatch: expected %d, got %d", len(largeData), len(downloadedData))
+	// Check response body by untarring
+	tr := tar.NewReader(bytes.NewReader(rr2.Body.Bytes()))
+	h, err := tr.Next()
+	if err != nil {
+		t.Fatalf("failed to read tar from download: %v", err)
 	}
-	for i, b := range downloadedData {
-		if b != largeData[i] {
-			t.Fatalf("downloaded data mismatch at byte %d", i)
-		}
+	if h.Name != "payload.bin" {
+		t.Fatalf("unexpected tar entry name: %s", h.Name)
+	}
+	gotData, err := io.ReadAll(tr)
+	if err != nil {
+		t.Fatalf("failed to read tar entry: %v", err)
+	}
+	if !bytes.Equal(gotData, largeData) {
+		t.Fatalf("downloaded data mismatch")
 	}
 }
