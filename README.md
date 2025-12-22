@@ -243,6 +243,16 @@ Modify `wails.json` for build settings and platform targets.
 go test ./...
 ```
 
+### Test Coverage (2025-12-23)
+- Overall: ~50.2% (from `go test -coverprofile=coverage.out ./...`)
+- Package `GOproject`: 49.4%
+- Package `clip_helper`: 62.2%
+- Package `cmd/lan_scanner`: 37.2%
+
+See [test_coverage.md](test_coverage.md) for function-level coverage and gap details.
+
+Re-run `go test -coverprofile=coverage.out ./...` before release to refresh these numbers.
+
 ### Code Signing (macOS)
 ```bash
 codesign --force --deep --sign - GOproject.app
