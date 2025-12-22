@@ -214,6 +214,19 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
           return null;
       }
 
+      const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+        event.dataTransfer.effectAllowed = 'copy';
+        if (item.type === 'text' && item.text) {
+          event.dataTransfer.setData('text/plain', item.text);
+        } else if (item.type === 'image' && item.text) {
+          // Fallback: share descriptive text for image
+          event.dataTransfer.setData('text/plain', '[Image] ' + item.text);
+        } else if (item.type === 'file') {
+          // Provide a hint to the drop target; real file transfer requires native integration
+          event.dataTransfer.setData('text/plain', 'Files ready to share');
+        }
+      };
+
       console.log("Rendering clipboard item:", item.type, item);
 
       const getTypeIcon = (type: string) => {
@@ -246,7 +259,7 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
         const downloadOpId = op.id || op.itemId;
 
         return (
-          <div key={op.id} className="clipboard-card" style={{
+          <div key={op.id} className="clipboard-card" draggable onDragStart={handleDragStart} style={{
               background: 'rgba(255, 255, 255, 0.05)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
               borderRadius: '12px',

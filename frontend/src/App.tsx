@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getAppMode } from './api/wailsBridge';
 import { EventsOn, WindowSetPosition, WindowSetSize, WindowShow, WindowSetAlwaysOnTop, WindowCenter, WindowUnmaximise, WindowReload } from '../wailsjs/runtime/runtime';
-import { GetClipboardType } from '../wailsjs/go/main/App';
+import { GetClipboardType, SetPendingClipboardFiles, SaveDroppedFiles, ShareSystemClipboard } from '../wailsjs/go/main/App';
 import HUD from './components/HUD';
 import Sidebar from './components/Sidebar';
 import LandingPage from './components/LandingPage';
@@ -35,15 +35,19 @@ function App() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [isHUDEnabled, setIsHUDEnabled] = useState(true);
   const [hudContentType, setHudContentType] = useState<string>('text');
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [dragError, setDragError] = useState<string | null>(null);
   const [mainWindowSize, setMainWindowSize] = useState({ width: 1024, height: 768 });
 
-  const HUD_WINDOW_WIDTH = 160;
-  const HUD_WINDOW_HEIGHT = 160;
+  const HUD_WINDOW_WIDTH = 320;
+  const HUD_WINDOW_HEIGHT = 320;
   const HUD_WINDOW_VERTICAL_OFFSET = 20;
 
-  const showHudAtCursor = ({ screenX, screenY }: { screenX: number; screenY: number }) => {
-    const targetX = Math.max(0, Math.round(screenX - HUD_WINDOW_WIDTH / 2));
-    const targetY = Math.max(0, Math.round(screenY - HUD_WINDOW_HEIGHT - HUD_WINDOW_VERTICAL_OFFSET));
+  const showHudAtCursor = ({ screenX, screenY }: { screenX?: number; screenY?: number } = {}) => {
+    const fallbackX = window.screenX + window.innerWidth / 2;
+    const fallbackY = window.screenY + window.innerHeight / 2;
+    const targetX = Math.max(0, Math.round((screenX ?? fallbackX) - HUD_WINDOW_WIDTH / 2));
+    const targetY = Math.max(0, Math.round((screenY ?? fallbackY) - HUD_WINDOW_HEIGHT - HUD_WINDOW_VERTICAL_OFFSET));
     WindowUnmaximise();
     WindowSetSize(HUD_WINDOW_WIDTH, HUD_WINDOW_HEIGHT);
     WindowSetPosition(targetX, targetY);
@@ -58,6 +62,79 @@ function App() {
       setTimeout(() => WindowSetAlwaysOnTop(true), 500);
     };
     setAlwaysOnTopRetry();
+  };
+
+  type DroppedFile = { file: File; rel: string };
+
+  const walkEntry = async (entry: any, prefix: string): Promise<DroppedFile[]> => {
+    return new Promise((resolve, reject) => {
+      if (entry?.isFile) {
+        entry.file((file: File) => resolve([{ file, rel: prefix }]), reject);
+        return;
+      }
+
+      if (entry?.isDirectory) {
+        const dirPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
+        const reader = entry.createReader();
+        const files: DroppedFile[] = [];
+
+        const readEntries = () => {
+          reader.readEntries(async (entries: any[]) => {
+            if (!entries.length) {
+              resolve(files);
+              return;
+            }
+
+            try {
+              for (const child of entries) {
+                const childFiles = await walkEntry(child, dirPrefix);
+                files.push(...childFiles);
+              }
+              readEntries();
+            } catch (err) {
+              reject(err);
+            }
+          }, reject);
+        };
+
+        readEntries();
+        return;
+      }
+
+      resolve([]);
+    });
+  };
+
+  const collectDroppedFiles = async (dataTransfer: DataTransfer): Promise<DroppedFile[]> => {
+    const items = Array.from(dataTransfer.items || []);
+
+    const entryPromises = items
+      .map((item) => {
+        const entry = (item as any).webkitGetAsEntry?.();
+        if (!entry) return null;
+        return walkEntry(entry, '');
+      })
+      .filter(Boolean) as Promise<DroppedFile[]>[];
+
+    try {
+      const entryResults = (await Promise.all(entryPromises)).flat();
+      if (entryResults.length) {
+        return entryResults;
+      }
+    } catch (err) {
+      console.warn('[drop] entry traversal failed', err);
+    }
+
+    const fallbackFiles = items
+      .map(i => i.kind === 'file' ? i.getAsFile() : null)
+      .filter((f): f is File => Boolean(f));
+    const files = fallbackFiles.length ? fallbackFiles : Array.from(dataTransfer.files || []);
+
+    return files.map((file) => {
+      const relPathRaw = (file as any).webkitRelativePath || '';
+      const rel = relPathRaw ? relPathRaw.replace(/^[/\\]+/, '').split('/').slice(0, -1).join('/') : '';
+      return { file, rel };
+    });
   };
 
   // Timer effect
@@ -143,6 +220,166 @@ function App() {
         if (cancelListener) cancelListener();
     };
   }, [appMode, isHUDEnabled]);
+
+  // Global drag-and-drop for sharing files/folders into the app
+  useEffect(() => {
+    const handleDragOver = (event: DragEvent) => {
+      if (!event.dataTransfer) return;
+      if (Array.from(event.dataTransfer.types).includes('Files')) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+        event.dataTransfer.effectAllowed = 'copy';
+        setIsDragOver(true);
+        console.debug('[dragover] Files detected; dropEffect set to copy');
+      }
+    };
+
+    const handleDragLeave = (event: DragEvent) => {
+      // Only reset when leaving document
+      if ((event.target as HTMLElement)?.contains?.(document.body)) return;
+      setIsDragOver(false);
+    };
+
+    const handleDrop = async (event: DragEvent) => {
+      if (!event.dataTransfer) return;
+      event.preventDefault();
+      setIsDragOver(false);
+      setDragError(null);
+
+      // Collect files (recurses folders on supporting browsers)
+      const dtItems = Array.from(event.dataTransfer.items || []);
+      const droppedFiles = await collectDroppedFiles(event.dataTransfer);
+      const fileList = droppedFiles.map(df => df.file);
+
+      // Debug: enumerate types & items
+      const types = Array.from(event.dataTransfer.types || []);
+      const items = Array.from(event.dataTransfer.items || []);
+      console.debug('[drop] types', types);
+      console.debug('[drop] items', items.map(i => ({ kind: i.kind, type: i.type })));
+
+      const publicFileUrl = event.dataTransfer.getData('public.file-url');
+      if (publicFileUrl) {
+        console.debug('[drop] public.file-url raw', publicFileUrl);
+      }
+
+      const nsFiles = event.dataTransfer.getData('com.apple.nsfilenames');
+      if (nsFiles) {
+        console.debug('[drop] com.apple.nsfilenames raw', nsFiles);
+      }
+
+      // Try file:// URI list first (Finder usually provides this)
+      const uriListRaw = event.dataTransfer.getData('text/uri-list');
+      const uriPaths = uriListRaw
+        ? uriListRaw
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(line => line.startsWith('file://'))
+            .map(line => decodeURI(line.replace('file://', '')))
+        : [];
+
+      // Try explicit file paths from File objects (may be empty in WKWebView)
+      const filePaths = fileList.map(f => (f as any).path).filter(Boolean) as string[];
+
+      // Try getAsString on string items (public.file-url) which can work on WKWebView
+      const stringPathPromises = dtItems
+        .filter(i => i.kind === 'string')
+        .map(i => new Promise<string>((resolve) => {
+          i.getAsString((s) => resolve(s || ''));
+        }));
+      const stringPathResults = await Promise.all(stringPathPromises);
+      const stringPaths = stringPathResults
+        .flatMap(raw => raw.split(/\r?\n/))
+        .map(line => line.trim())
+        .filter(line => line.startsWith('file://'))
+        .map(line => decodeURI(line.replace('file://', '')));
+
+      // Merge unique paths
+      const paths = Array.from(new Set([...uriPaths, ...filePaths, ...stringPaths]));
+
+      console.debug('[drop] files length', fileList.length, 'uriPaths', uriPaths, 'filePaths length', filePaths.length, 'merged paths length', paths.length);
+      if (fileList.length && !paths.length) {
+        console.warn('[drop] files present but no paths resolved (webview sandbox may hide paths). URI list raw:', uriListRaw);
+      }
+
+      let effectivePaths = paths;
+
+      // Fallback: if no paths, pull file bytes into temp files via backend
+      if (!effectivePaths.length && fileList.length) {
+        try {
+          console.debug('[drop] attempting in-memory transfer of files');
+          const payloads = await Promise.all(
+            droppedFiles.map(async ({ file, rel }) => {
+              const base64 = await readFileToBase64(file);
+              return { name: file.name || 'dropped.bin', rel, data: base64 };
+            })
+          );
+          effectivePaths = await SaveDroppedFiles(payloads as any);
+          console.debug('[drop] in-memory transfer produced paths', effectivePaths);
+        } catch (err) {
+          console.error('[drop] in-memory transfer failed', err);
+        }
+      }
+
+      if (!effectivePaths.length) {
+        console.warn('[drop] no usable file paths; aborting');
+        return;
+      }
+
+      try {
+        await SetPendingClipboardFiles(effectivePaths);
+        console.debug('[drop] cached paths, invoking ShareSystemClipboard');
+        await ShareSystemClipboard();
+        console.debug('[drop] share complete');
+      } catch (err) {
+        console.error('Failed to share dropped files', err);
+        setDragError('Failed to share dropped files');
+      }
+    };
+
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('dragleave', handleDragLeave);
+    window.addEventListener('drop', handleDrop);
+
+    return () => {
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('drop', handleDrop);
+    };
+  }, []);
+
+  // Convert File to base64 safely (arrayBuffer with fallback to FileReader)
+  const readFileToBase64 = (file: File): Promise<string> => {
+    const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+      const bytes = new Uint8Array(buffer);
+      const chunkSize = 0x8000;
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, Array.from(chunk));
+      }
+      return btoa(binary);
+    };
+
+    return file.arrayBuffer()
+      .then(arrayBufferToBase64)
+      .catch((err) => {
+        console.warn('[drop] arrayBuffer failed, falling back to FileReader', err);
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(reader.error);
+          reader.onload = () => {
+            try {
+              const result = reader.result as string;
+              const base64 = result.startsWith('data:') ? result.split(',')[1] : result;
+              resolve(base64);
+            } catch (e) {
+              reject(e);
+            }
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+  };
 
   // Connect to SSE when currentUser is set
   useEffect(() => {
@@ -270,6 +507,15 @@ function App() {
 
   return (
     <div className="app-container">
+      {isDragOver && (
+        <div className="drag-overlay">
+          <div className="drag-overlay__card">
+            <div className="drag-overlay__title">Drop to share</div>
+            <div className="drag-overlay__hint">Files and folders are supported</div>
+            {dragError && <div className="drag-overlay__error">{dragError}</div>}
+          </div>
+        </div>
+      )}
       <TitleBar />
       <div className="content">
         <Sidebar 

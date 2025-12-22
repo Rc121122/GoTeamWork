@@ -41,7 +41,11 @@ export function ListAllUsers():Promise<Array<main.User>>;
 
 export function RequestJoinRoom(arg1:string,arg2:string):Promise<string>;
 
+export function SaveDroppedFiles(arg1:Array<main.DroppedFilePayload>):Promise<Array<string>>;
+
 export function SendChatMessage(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function SetPendingClipboardFiles(arg1:Array<string>):Promise<boolean>;
 
 export function SetServerURL(arg1:string):Promise<void>;
 

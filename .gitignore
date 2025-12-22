@@ -4,3 +4,4 @@ frontend/dist
 *.exe
 GOproject
 .DS_Store
+docs/report2.md

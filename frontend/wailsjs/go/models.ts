@@ -55,6 +55,22 @@ export namespace main {
 	        this.timestamp = source["timestamp"];
 	    }
 	}
+	export class DroppedFilePayload {
+	    name: string;
+	    rel: string;
+	    data: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DroppedFilePayload(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.rel = source["rel"];
+	        this.data = source["data"];
+	    }
+	}
 	export class Item {
 	    id: string;
 	    type: string;

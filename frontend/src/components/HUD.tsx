@@ -84,7 +84,7 @@ const HUD: React.FC<HUDProps> = ({ onClose, contentType = 'text' }) => {
       <img 
         src={getIconForContentType(contentType, state)} 
         alt="Gopher" 
-        style={{ width: '40px', cursor: 'pointer', marginLeft: '100px', WebkitAppRegion: 'no-drag', opacity: 0.9 } as React.CSSProperties} 
+        style={{ width: '80px', cursor: 'pointer', marginLeft: '200px', WebkitAppRegion: 'no-drag', opacity: 0.9 } as React.CSSProperties} 
         onMouseDown={(e) => e.stopPropagation()}
         onClick={handleClick}
       />

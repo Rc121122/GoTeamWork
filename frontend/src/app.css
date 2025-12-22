@@ -1279,6 +1279,45 @@ h2 {
 
 .user-list-container {
     flex: 1;
+.drag-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 12000;
+    pointer-events: none;
+}
+
+.drag-overlay__card {
+    background: rgba(20, 20, 20, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    padding: 16px 22px;
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.35);
+    color: #f6f6f6;
+    min-width: 220px;
+    pointer-events: auto;
+    text-align: center;
+}
+
+.drag-overlay__title {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+.drag-overlay__hint {
+    font-size: 14px;
+    opacity: 0.85;
+}
+
+.drag-overlay__error {
+    margin-top: 8px;
+    color: #ff8a8a;
+    font-size: 13px;
+}
     padding: 2rem;
     display: flex;
     flex-direction: column;

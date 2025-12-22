@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"encoding/base64"
 	"io"
 	"mime"
 	"os"
@@ -30,6 +31,13 @@ const (
 var (
 	getMousePosition func() (int, int)
 )
+
+// DroppedFilePayload is used by the frontend to send in-memory file bytes when native paths are unavailable (macOS WKWebView sandbox)
+type DroppedFilePayload struct {
+	Name string `json:"name"`
+	Rel  string `json:"rel"`  // relative path inside a folder drop (optional)
+	Data string `json:"data"` // base64 encoded
+}
 
 // StartClipboardMonitor starts monitoring for clipboard changes
 func (a *App) StartClipboardMonitor() {
@@ -677,6 +685,91 @@ func (a *App) GetClipboardItem() (*clip_helper.ClipboardItem, error) {
 	return clip_helper.ReadClipboard()
 }
 
+// SaveDroppedFiles writes in-memory dropped files to a temp directory and returns their paths
+func (a *App) SaveDroppedFiles(files []DroppedFilePayload) ([]string, error) {
+	if len(files) == 0 {
+		return nil, errors.New("no files provided")
+	}
+
+	dropDir := filepath.Join(os.TempDir(), "goteamwork_drops")
+	if err := os.MkdirAll(dropDir, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create drop dir: %w", err)
+	}
+
+	dropRoot := filepath.Join(dropDir, fmt.Sprintf("drop_%d", time.Now().UnixNano()))
+	if err := os.MkdirAll(dropRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create drop root: %w", err)
+	}
+
+	sep := string(os.PathSeparator)
+	seenTop := make(map[string]struct{})
+	var topPaths []string
+
+	for _, f := range files {
+		if f.Name == "" {
+			return nil, errors.New("file name is required")
+		}
+		data, err := decodeBase64(f.Data)
+		if err != nil {
+			return nil, fmt.Errorf("decode %s: %w", f.Name, err)
+		}
+		name := filepath.Base(f.Name)
+		rel := filepath.Clean(f.Rel)
+		rel = strings.TrimPrefix(rel, sep)
+		if rel == "." || rel == sep {
+			rel = ""
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+sep) {
+			return nil, fmt.Errorf("invalid relative path: %s", f.Rel)
+		}
+
+		targetRel := filepath.Join(rel, name)
+		target := filepath.Join(dropRoot, targetRel)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
+		}
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			return nil, fmt.Errorf("write %s: %w", target, err)
+		}
+
+		normalizedRel := filepath.ToSlash(targetRel)
+		topSegment := normalizedRel
+		if idx := strings.IndexRune(normalizedRel, '/'); idx != -1 {
+			topSegment = normalizedRel[:idx]
+		}
+		topPath := filepath.Join(dropRoot, topSegment)
+		if _, exists := seenTop[topPath]; !exists {
+			seenTop[topPath] = struct{}{}
+			topPaths = append(topPaths, topPath)
+		}
+	}
+
+	return topPaths, nil
+}
+
+// SetPendingClipboardFiles caches a clipboard item built from dropped file paths so it can be shared immediately
+func (a *App) SetPendingClipboardFiles(paths []string) (bool, error) {
+	if len(paths) == 0 {
+		return false, errors.New("no file paths provided")
+	}
+
+	// Validate paths exist before caching
+	for _, p := range paths {
+		if _, err := os.Stat(p); err != nil {
+			return false, fmt.Errorf("invalid path %s: %w", p, err)
+		}
+	}
+
+	item := &clip_helper.ClipboardItem{
+		Type:  clip_helper.ClipboardFile,
+		Files: paths,
+		Text:  fmt.Sprintf("%d files selected", len(paths)),
+	}
+
+	a.cacheClipboardItem(item)
+	return true, nil
+}
+
 // GetClipboardType returns the type of current clipboard content without reading the full content
 func (a *App) GetClipboardType() (string, error) {
 	item, err := clip_helper.ReadClipboard()
@@ -684,4 +777,9 @@ func (a *App) GetClipboardType() (string, error) {
 		return "", err
 	}
 	return string(item.Type), nil
+}
+
+// decodeBase64 decodes a base64 string
+func decodeBase64(s string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(s)
 }

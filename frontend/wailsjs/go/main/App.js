@@ -78,8 +78,16 @@ export function RequestJoinRoom(arg1, arg2) {
   return window['go']['main']['App']['RequestJoinRoom'](arg1, arg2);
 }
 
+export function SaveDroppedFiles(arg1) {
+  return window['go']['main']['App']['SaveDroppedFiles'](arg1);
+}
+
 export function SendChatMessage(arg1, arg2, arg3) {
   return window['go']['main']['App']['SendChatMessage'](arg1, arg2, arg3);
+}
+
+export function SetPendingClipboardFiles(arg1) {
+  return window['go']['main']['App']['SetPendingClipboardFiles'](arg1);
 }
 
 export function SetServerURL(arg1) {
