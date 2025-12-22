@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"encoding/base64"
 	"io"
 	"mime"
 	"os"
@@ -18,21 +19,38 @@ import (
 	"golang.design/x/clipboard"
 )
 
+type fileShareKind string
+
+const (
+	kindSingle fileShareKind = "single_file"
+	kindFiles  fileShareKind = "multiple_files"
+	kindDirs   fileShareKind = "folders"
+	kindMixed  fileShareKind = "mixed"
+)
+
 var (
 	getMousePosition func() (int, int)
 )
 
+// DroppedFilePayload is used by the frontend to send in-memory file bytes when native paths are unavailable (macOS WKWebView sandbox)
+type DroppedFilePayload struct {
+	Name string `json:"name"`
+	Rel  string `json:"rel"`  // relative path inside a folder drop (optional)
+	Data string `json:"data"` // base64 encoded
+}
+
 // StartClipboardMonitor starts monitoring for clipboard changes
 func (a *App) StartClipboardMonitor() {
+	fmt.Println("[DEBUG] Starting clipboard monitor")
 	a.clipboardMonitorOnce.Do(func() {
 		if a.ctx == nil {
-			fmt.Println("Clipboard monitor skipped: no app context")
+			fmt.Println("[DEBUG] Clipboard monitor skipped: no app context")
 			return
 		}
 
 		// Check clipboard permissions for all platforms
 		if !a.ensureAccessibilityPermission() {
-			fmt.Println("Clipboard permission denied; clipboard monitor disabled")
+			fmt.Println("[DEBUG] Clipboard permission denied; clipboard monitor disabled")
 			// return // Don't return, try to proceed as clipboard read might still work
 		}
 
@@ -44,50 +62,129 @@ func (a *App) StartClipboardMonitor() {
 		if err := StartClipboardWatcher(ctx, func(item *clip_helper.ClipboardItem, screenX, screenY int) {
 			a.prepareClipboardShare(item, screenX, screenY)
 		}); err != nil {
-			fmt.Printf("StartClipboardWatcher failed: %v\n", err)
+			fmt.Printf("[DEBUG] StartClipboardWatcher failed: %v\n", err)
 		}
 	})
 }
 
-// handleClipboardCopy processes a copied clipboard item
-func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
-	if item == nil {
+func classifyClipboardPaths(paths []string) (fileShareKind, error) {
+	if len(paths) == 0 {
+		return kindMixed, fmt.Errorf("no paths to classify")
+	}
+
+	files := 0
+	dirs := 0
+
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			return kindMixed, fmt.Errorf("stat failed for %s: %w", p, err)
+		}
+		if info.IsDir() {
+			dirs++
+		} else {
+			files++
+		}
+	}
+
+	if files == 1 && dirs == 0 {
+		return kindSingle, nil
+	}
+	if dirs > 0 && files == 0 {
+		return kindDirs, nil
+	}
+	if dirs > 0 && files > 0 {
+		return kindMixed, nil
+	}
+	return kindFiles, nil
+}
+
+func totalClipboardSize(paths []string) (int64, error) {
+	var total int64
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			return 0, fmt.Errorf("stat failed for %s: %w", p, err)
+		}
+		if info.IsDir() {
+			err = filepath.Walk(p, func(path string, fi os.FileInfo, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if fi.Mode().IsRegular() {
+					total += fi.Size()
+				}
+				return nil
+			})
+			if err != nil {
+				return 0, err
+			}
+			continue
+		}
+		total += info.Size()
+	}
+	return total, nil
+}
+
+// reportTransferTiming calculates and displays transfer timing and speed
+func (a *App) reportTransferTiming(operation string) {
+	if a.shareStartTime.IsZero() || a.totalBytesTransferred == 0 {
 		return
 	}
 
-	fmt.Printf("Clipboard copied: type=%s\n", item.Type)
+	elapsed := time.Since(a.shareStartTime)
+	seconds := elapsed.Seconds()
+	gbPerSecond := float64(a.totalBytesTransferred) / (1024 * 1024 * 1024) / seconds
+
+	fmt.Printf("[TIMER] %s completed in %.2fs - %.2f GB/s (%s transferred)\n",
+		operation, seconds, gbPerSecond, clip_helper.HumanFileSize(a.totalBytesTransferred))
+
+	// Reset for next measurement
+	a.shareStartTime = time.Time{}
+	a.totalBytesTransferred = 0
+}
+
+// handleClipboardCopy processes a copied clipboard item
+func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
+	fmt.Printf("[DEBUG] handleClipboardCopy: processing item type=%s\n", item.Type)
+	if item == nil {
+		fmt.Println("[DEBUG] handleClipboardCopy: item is nil")
+		return
+	}
 
 	if item.Type == clip_helper.ClipboardText {
+		fmt.Printf("[DEBUG] Processing text clipboard: %s\n", item.Text)
 		item.Text = sanitizeClipboardText(item.Text)
 		if item.Text == "" {
-			fmt.Println("Clipboard text empty after sanitization; skipping broadcast")
+			fmt.Println("[DEBUG] Clipboard text empty after sanitization; skipping broadcast")
 			return
 		}
 	}
 
 	// Check file sizes for file clipboard items
 	if item.Type == clip_helper.ClipboardFile && len(item.Files) > 0 {
-		const maxIndividualFileSize = 10 * 1024 * 1024 * 1024 // 10GB per file
-		const maxTotalFiles = 100                             // Maximum 100 files
+		fmt.Printf("[DEBUG] Checking %d files...\n", len(item.Files))
+		const maxIndividualFileSize = 100 * 1024 * 1024 * 1024 // 100GB per file
+		const maxTotalFiles = 100                               // Maximum 100 files
 
 		if len(item.Files) > maxTotalFiles {
-			fmt.Printf("Too many files: %d (max %d), skipping\n", len(item.Files), maxTotalFiles)
+			fmt.Printf("[DEBUG] Too many files: %d (max %d), skipping\n", len(item.Files), maxTotalFiles)
 			return
 		}
 
 		for _, filePath := range item.Files {
 			info, err := os.Stat(filePath)
 			if err != nil {
-				fmt.Printf("Failed to stat file %s: %v, skipping\n", filePath, err)
+				fmt.Printf("[DEBUG] Failed to stat file %s: %v, skipping\n", filePath, err)
 				return
 			}
 			if info.Size() > maxIndividualFileSize {
-				fmt.Printf("File %s too large: %d bytes (max %d bytes), skipping\n",
+				fmt.Printf("[DEBUG] File %s too large: %d bytes (max %d bytes), skipping\n",
 					filePath, info.Size(), maxIndividualFileSize)
 				return
 			}
 		}
-		fmt.Printf("File validation passed: %d files\n", len(item.Files))
+		fmt.Printf("[DEBUG] File validation passed: %d files\n", len(item.Files))
 	}
 
 	// Assume roomID from current room or something, but since broadcast to all, perhaps global or per room.
@@ -95,26 +192,31 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 	// To fit, perhaps add to a global room or modify.
 
 	if a.Mode == "client" {
+		fmt.Println("[DEBUG] Client mode: uploading clipboard item")
 		// Upload to server
 		op, err := a.networkClient.UploadClipboardItem(item, a.currentUser.ID, a.currentUser.Name)
 		if err != nil {
-			fmt.Printf("Failed to upload clipboard item: %v\n", err)
+			fmt.Printf("[DEBUG] Failed to upload clipboard item: %v\n", err)
 			return
 		}
+		fmt.Printf("[DEBUG] Upload successful, op ID: %s\n", op.ID)
 
-		// If file, start async zip
-		if item.Type == clip_helper.ClipboardFile && len(item.ZipData) == 0 && len(item.Files) > 0 {
-			go a.processFileZip("global", op.ItemID, item, op.ID)
+		// If file, start async archive processing
+		if item.Type == clip_helper.ClipboardFile && item.ArchiveFilePath == "" && len(item.Files) > 0 {
+			fmt.Println("[DEBUG] Starting async archive/process for client")
+			go a.processFileArchive("global", op.ItemID, item, op.ID)
 		}
 		return
 	}
 
 	// Host logic: require room
 	if a.currentUser.RoomID == nil {
+		fmt.Println("[DEBUG] Host mode: not in a room, cannot share")
 		// Host not in a room, cannot share
 		return
 	}
 	roomID := *a.currentUser.RoomID
+	fmt.Printf("[DEBUG] Host mode: sharing to room %s\n", roomID)
 
 	// Create item ID
 	itemID := fmt.Sprintf("clip_%d", time.Now().UnixNano())
@@ -139,122 +241,127 @@ func (a *App) handleClipboardCopy(item *clip_helper.ClipboardItem) {
 	a.mu.RUnlock()
 
 	if roomExists {
+		fmt.Printf("[DEBUG] Broadcasting clipboard copy to %d members\n", len(members))
 		a.sseManager.BroadcastToUsers(members, EventClipboardCopied, op, "")
 	}
 
-	// If it's a file type and ZipData is empty, start async zipping
-	if item.Type == clip_helper.ClipboardFile && len(item.ZipData) == 0 && len(item.Files) > 0 {
-		go a.processFileZip(roomID, itemID, item, "")
+	// If it's a file type and no archive exists, start async archiving
+	if item.Type == clip_helper.ClipboardFile && item.ArchiveFilePath == "" && len(item.Files) > 0 {
+		fmt.Println("[DEBUG] Starting async archive process for host")
+		go a.processFileArchive(roomID, itemID, item, "")
 	}
 }
+func (a *App) processFileArchive(roomID, itemID string, item *clip_helper.ClipboardItem, serverOpID string) {
+	kind, err := classifyClipboardPaths(item.Files)
+	if err != nil {
+		fmt.Printf("[DEBUG] Failed to classify files: %v\n", err)
+		return
+	}
 
-func (a *App) processFileZip(roomID, itemID string, item *clip_helper.ClipboardItem, serverOpID string) {
-	fmt.Printf("Starting async zip for item %s with %d files\n", itemID, len(item.Files))
+	fmt.Printf("[DEBUG] Starting async archive for item %s (%s), %d entries\n", itemID, kind, len(item.Files))
 
 	// Direct send for single-file shares
-	if len(item.Files) == 1 {
+	if kind == kindSingle {
+		fmt.Printf("[DEBUG] Single file detected, processing directly\n")
 		a.processSingleFileShare(roomID, itemID, item, serverOpID)
 		return
 	}
 
-	// Check total file size before compression (limit to 10GB)
-	const maxZipSize = 10 * 1024 * 1024 * 1024 // 10GB
-	var totalSize int64 = 0
+	// Check total file size before archiving (limit to 100GB)
+	const maxArchiveSize = 100 * 1024 * 1024 * 1024 // 100GB
+	totalSize, err := totalClipboardSize(item.Files)
+	if err != nil {
+		fmt.Printf("[DEBUG] Failed to calculate total size: %v\n", err)
+		return
+	}
 
-	for _, filePath := range item.Files {
-		info, err := os.Stat(filePath)
-		if err != nil {
-			fmt.Printf("Failed to stat file %s: %v\n", filePath, err)
-			continue
+	fmt.Printf("[DEBUG] Total file size: %d bytes, proceeding with tar archiving\n", totalSize)
+
+	// Stream directly to final tar file (no temp file overhead)
+	archiveFilePath := filepath.Join(a.tempDir, itemID+".tar")
+	archiveFile, err := os.Create(archiveFilePath)
+	if err != nil {
+		fmt.Printf("[DEBUG] Failed to create tar file: %v\n", err)
+		return
+	}
+	defer archiveFile.Close()
+
+	fmt.Printf("[DEBUG] Created tar file: %s\n", archiveFilePath)
+
+	// Set up progress reporting for large archives (>100MB)
+	var progressCallback clip_helper.ProgressCallback
+	if totalSize > 100*1024*1024 {
+		progressCallback = func(processedBytes int64, totalBytes int64, currentFile string) {
+			fmt.Printf("[DEBUG] Archiving progress: %s (%d MB processed)\n", currentFile, processedBytes/(1024*1024))
 		}
-		totalSize += info.Size()
 	}
 
-	if totalSize > maxZipSize {
-		fmt.Printf("Total file size %d bytes exceeds limit of %d bytes, skipping compression\n", totalSize, maxZipSize)
-		a.mu.Lock()
-		item.Text = fmt.Sprintf("Files too large to compress (%d MB > %d MB limit)", totalSize/(1024*1024), maxZipSize/(1024*1024))
-		a.mu.Unlock()
+	// Choose tar implementation based on size and settings
+	var archiveErr error
+	if a.useFastTar && totalSize > 1024*1024*1024 { // Use fast tar for files >1GB
+		fmt.Printf("[DEBUG] Using fast tar library for large archive\n")
+		archiveErr = clip_helper.TarPathsFast(item.Files, archiveFile)
+	} else {
+		fmt.Printf("[DEBUG] Using optimized standard tar library\n")
+		archiveErr = clip_helper.TarPathsWithProgress(item.Files, archiveFile, progressCallback)
+	}
+
+	if archiveErr != nil {
+		fmt.Printf("[DEBUG] Failed to create tar archive: %v\n", archiveErr)
+		archiveFile.Close()
+		os.Remove(archiveFilePath)
 		return
 	}
 
-	fmt.Printf("Total file size: %d bytes, proceeding with compression\n", totalSize)
+	// Close the file to ensure all data is written
+	if err := archiveFile.Close(); err != nil {
+		fmt.Printf("[DEBUG] Failed to close tar file: %v\n", err)
+		os.Remove(archiveFilePath)
+		return
+	}
 
-	// Create a temp zip file
-	tmpFile, err := os.CreateTemp("", "clipboard_files_*.zip")
+	// Get final archive size
+	archiveInfo, err := os.Stat(archiveFilePath)
 	if err != nil {
-		fmt.Printf("Failed to create temp zip file: %v\n", err)
-		return
-	}
-	defer os.Remove(tmpFile.Name()) // Clean up temp file after reading
-	defer tmpFile.Close()
-
-	if err := clip_helper.ZipFiles(item.Files, tmpFile); err != nil {
-		fmt.Printf("Failed to zip files: %v\n", err)
+		fmt.Printf("[DEBUG] Failed to stat tar file: %v\n", err)
+		os.Remove(archiveFilePath)
 		return
 	}
 
-	// Check the final zip file size
-	zipInfo, err := tmpFile.Stat()
-	if err != nil {
-		fmt.Printf("Failed to stat zip file: %v\n", err)
-		return
-	}
-
-	zipSize := zipInfo.Size()
-	if zipSize > maxZipSize {
-		fmt.Printf("Compressed zip size %d bytes exceeds limit of %d bytes\n", zipSize, maxZipSize)
-		a.mu.Lock()
-		item.Text = fmt.Sprintf("Compressed size too large (%d MB > %d MB limit)", zipSize/(1024*1024), maxZipSize/(1024*1024))
-		a.mu.Unlock()
-		return
-	}
-
-	// Read the zip file back into memory
-	if _, err := tmpFile.Seek(0, 0); err != nil {
-		fmt.Printf("Failed to seek temp zip file: %v\n", err)
-		return
-	}
-
-	zipData, err := io.ReadAll(tmpFile)
-	if err != nil {
-		fmt.Printf("Failed to read temp zip file: %v\n", err)
-		return
-	}
+	archiveSize := archiveInfo.Size()
 
 	// Update the item in history pool
 	a.mu.Lock()
-	item.ZipData = zipData
-	item.Text = fmt.Sprintf("%d files compressed (ready)", len(item.Files))
+	item.ArchiveFilePath = archiveFilePath
+	item.Text = fmt.Sprintf("%d items archived (ready)", len(item.Files))
 	a.mu.Unlock()
 
-	fmt.Printf("Async zip completed for item %s, size: %d bytes\n", itemID, len(zipData))
+	fmt.Printf("[DEBUG] Direct tar archive completed for item %s, size: %d bytes\n", itemID, archiveSize)
 
 	if a.Mode == "client" {
 		if serverOpID != "" {
-			if err := a.networkClient.UploadZipData(serverOpID, zipData); err != nil {
-				fmt.Printf("Failed to upload zip data: %v\n", err)
+			// Upload archive file from disk instead of loading into memory
+			fmt.Printf("[DEBUG] Uploading archive file to server op %s\n", serverOpID)
+			if err := a.networkClient.UploadZipFile(serverOpID, archiveFilePath); err != nil {
+				fmt.Printf("[DEBUG] Failed to upload archive file: %v\n", err)
 				return
 			}
-			fmt.Printf("Uploaded zip data for op %s\n", serverOpID)
+			fmt.Printf("[DEBUG] Uploaded archive file for op %s\n", serverOpID)
+			a.reportTransferTiming("Archive upload")
 		}
 		return
 	}
 
+	fmt.Printf("[DEBUG] Broadcasting archive update for item %s\n", itemID)
 	a.broadcastClipboardUpdate(roomID, itemID)
 }
 
 func (a *App) processSingleFileShare(roomID, itemID string, item *clip_helper.ClipboardItem, serverOpID string) {
+	fmt.Printf("[DEBUG] Processing single file share for item %s\n", itemID)
 	filePath := item.Files[0]
 	info, err := os.Stat(filePath)
 	if err != nil {
-		fmt.Printf("Failed to stat single file %s: %v\n", filePath, err)
-		return
-	}
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		fmt.Printf("Failed to read single file %s: %v\n", filePath, err)
+		fmt.Printf("[DEBUG] Failed to stat single file %s: %v\n", filePath, err)
 		return
 	}
 
@@ -262,33 +369,66 @@ func (a *App) processSingleFileShare(roomID, itemID string, item *clip_helper.Cl
 	mimeType := detectMimeType(fileName)
 	thumb := buildFileThumb(fileName)
 
+	fmt.Printf("[DEBUG] Single file: %s (%s, %d bytes)\n", fileName, mimeType, info.Size())
+
+	// Save the single file to temp directory without loading into memory
+	singleFilePath := filepath.Join(a.tempDir, itemID+"_"+fileName)
+	fmt.Printf("[DEBUG] Copying single file to temp: %s -> %s\n", filePath, singleFilePath)
+	src, err := os.Open(filePath)
+	if err != nil {
+		fmt.Printf("[DEBUG] Failed to open single file %s: %v\n", filePath, err)
+		return
+	}
+	defer src.Close()
+
+	dest, err := os.Create(singleFilePath)
+	if err != nil {
+		fmt.Printf("[DEBUG] Failed to create temp single file: %v\n", err)
+		return
+	}
+	if _, err := io.Copy(dest, src); err != nil {
+		dest.Close()
+		fmt.Printf("[DEBUG] Failed to copy single file: %v\n", err)
+		return
+	}
+	if err := dest.Close(); err != nil {
+		fmt.Printf("[DEBUG] Failed to finalize single file copy: %v\n", err)
+		return
+	}
+	fmt.Printf("[DEBUG] Single file copied to temp successfully\n")
+
 	a.mu.Lock()
 	item.IsSingleFile = true
 	item.SingleFileName = fileName
 	item.SingleFileMime = mimeType
 	item.SingleFileSize = info.Size()
 	item.SingleFileThumb = thumb
-	item.SingleFileData = data
+	item.SingleFilePath = singleFilePath
 	item.ZipData = nil
 	item.Text = fmt.Sprintf("%s (%s) ready", fileName, clip_helper.HumanFileSize(info.Size()))
 	a.mu.Unlock()
 
-	fmt.Printf("Prepared single file share %s (%d bytes)\n", fileName, len(data))
+	fmt.Printf("[DEBUG] Prepared single file share %s (%d bytes)\n", fileName, info.Size())
 
 	if a.Mode == "client" {
 		if serverOpID != "" {
-			if err := a.networkClient.UploadSingleFileData(serverOpID, data, fileName, mimeType, info.Size(), thumb); err != nil {
-				fmt.Printf("Failed to upload single file data: %v\n", err)
+			fmt.Printf("[DEBUG] Client mode: uploading single file for op %s\n", serverOpID)
+			// Upload single file from disk instead of loading into memory
+			if err := a.networkClient.UploadSingleFile(serverOpID, singleFilePath, fileName, mimeType, info.Size(), thumb); err != nil {
+				fmt.Printf("[DEBUG] Failed to upload single file: %v\n", err)
 			}
-			fmt.Printf("Uploaded single file data for op %s\n", serverOpID)
+			fmt.Printf("[DEBUG] Uploaded single file for op %s\n", serverOpID)
+			a.reportTransferTiming("Single file upload")
 		}
 		return
 	}
 
+	fmt.Printf("[DEBUG] Host mode: broadcasting single file update for room %s\n", roomID)
 	a.broadcastClipboardUpdate(roomID, itemID)
 }
 
 func (a *App) broadcastClipboardUpdate(roomID, itemID string) {
+	fmt.Printf("[DEBUG] Broadcasting clipboard update for item %s in room %s\n", itemID, roomID)
 	ops := a.historyPool.GetOperations(roomID, "", "")
 	var targetOp *Operation
 	for _, op := range ops {
@@ -299,7 +439,7 @@ func (a *App) broadcastClipboardUpdate(roomID, itemID string) {
 	}
 
 	if targetOp == nil {
-		fmt.Printf("Warning: Could not find operation for item %s to broadcast update\n", itemID)
+		fmt.Printf("[DEBUG] Warning: Could not find operation for item %s to broadcast update\n", itemID)
 		return
 	}
 
@@ -312,8 +452,11 @@ func (a *App) broadcastClipboardUpdate(roomID, itemID string) {
 	a.mu.RUnlock()
 
 	if roomExists {
-		fmt.Printf("Broadcasting clipboard update for item %s\n", itemID)
+		fmt.Printf("[DEBUG] Broadcasting clipboard update for item %s to %d members\n", itemID, len(members))
 		a.sseManager.BroadcastToUsers(members, EventClipboardUpdated, targetOp, "")
+		fmt.Printf("[DEBUG] Clipboard update broadcast completed for item %s\n", itemID)
+	} else {
+		fmt.Printf("[DEBUG] Room %s not found, cannot broadcast clipboard update\n", roomID)
 	}
 }
 
@@ -412,6 +555,9 @@ func startWindowsFilePoller(ctx context.Context, cb func(*clip_helper.ClipboardI
 				lastDetectionTime = now
 				lastFilePathsHash = currentHash
 				x, y := getMousePosition()
+				// Emit HUD first (nil item triggers HUD display)
+				cb(nil, x, y)
+				// Then provide the item
 				cb(item, x, y)
 			}
 		}
@@ -504,15 +650,32 @@ func (a *App) consumePendingClipboardItem() *clip_helper.ClipboardItem {
 // ShareSystemClipboard publishes the most recent clipboard capture.
 // If the cached value expired, it re-reads the live clipboard as a fallback.
 func (a *App) ShareSystemClipboard() (bool, error) {
+	fmt.Println("ShareSystemClipboard called")
+	a.shareStartTime = time.Now() // Record start time for performance measurement
+
 	item := a.consumePendingClipboardItem()
 	if item == nil {
+		fmt.Println("No pending item or expired, reading from clipboard directly")
 		var err error
 		item, err = clip_helper.ReadClipboard()
 		if err != nil {
+			fmt.Printf("Failed to read clipboard: %v\n", err)
 			return false, err
+		}
+	} else {
+		fmt.Println("Using pending clipboard item")
+	}
+
+	// Calculate total bytes for performance measurement
+	if item.Type == clip_helper.ClipboardFile && len(item.Files) > 0 {
+		totalBytes, err := totalClipboardSize(item.Files)
+		if err == nil {
+			a.totalBytesTransferred = totalBytes
+			fmt.Printf("[TIMER] Starting transfer of %d bytes (%s)\n", totalBytes, clip_helper.HumanFileSize(totalBytes))
 		}
 	}
 
+	fmt.Printf("Processing clipboard item: Type=%s, Files=%d\n", item.Type, len(item.Files))
 	a.handleClipboardCopy(item)
 	return true, nil
 }
@@ -520,4 +683,103 @@ func (a *App) ShareSystemClipboard() (bool, error) {
 // GetClipboardItem is a Wails-exposed function to manually get clipboard content
 func (a *App) GetClipboardItem() (*clip_helper.ClipboardItem, error) {
 	return clip_helper.ReadClipboard()
+}
+
+// SaveDroppedFiles writes in-memory dropped files to a temp directory and returns their paths
+func (a *App) SaveDroppedFiles(files []DroppedFilePayload) ([]string, error) {
+	if len(files) == 0 {
+		return nil, errors.New("no files provided")
+	}
+
+	dropDir := filepath.Join(os.TempDir(), "goteamwork_drops")
+	if err := os.MkdirAll(dropDir, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create drop dir: %w", err)
+	}
+
+	dropRoot := filepath.Join(dropDir, fmt.Sprintf("drop_%d", time.Now().UnixNano()))
+	if err := os.MkdirAll(dropRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create drop root: %w", err)
+	}
+
+	sep := string(os.PathSeparator)
+	seenTop := make(map[string]struct{})
+	var topPaths []string
+
+	for _, f := range files {
+		if f.Name == "" {
+			return nil, errors.New("file name is required")
+		}
+		data, err := decodeBase64(f.Data)
+		if err != nil {
+			return nil, fmt.Errorf("decode %s: %w", f.Name, err)
+		}
+		name := filepath.Base(f.Name)
+		rel := filepath.Clean(f.Rel)
+		rel = strings.TrimPrefix(rel, sep)
+		if rel == "." || rel == sep {
+			rel = ""
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+sep) {
+			return nil, fmt.Errorf("invalid relative path: %s", f.Rel)
+		}
+
+		targetRel := filepath.Join(rel, name)
+		target := filepath.Join(dropRoot, targetRel)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return nil, fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
+		}
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			return nil, fmt.Errorf("write %s: %w", target, err)
+		}
+
+		normalizedRel := filepath.ToSlash(targetRel)
+		topSegment := normalizedRel
+		if idx := strings.IndexRune(normalizedRel, '/'); idx != -1 {
+			topSegment = normalizedRel[:idx]
+		}
+		topPath := filepath.Join(dropRoot, topSegment)
+		if _, exists := seenTop[topPath]; !exists {
+			seenTop[topPath] = struct{}{}
+			topPaths = append(topPaths, topPath)
+		}
+	}
+
+	return topPaths, nil
+}
+
+// SetPendingClipboardFiles caches a clipboard item built from dropped file paths so it can be shared immediately
+func (a *App) SetPendingClipboardFiles(paths []string) (bool, error) {
+	if len(paths) == 0 {
+		return false, errors.New("no file paths provided")
+	}
+
+	// Validate paths exist before caching
+	for _, p := range paths {
+		if _, err := os.Stat(p); err != nil {
+			return false, fmt.Errorf("invalid path %s: %w", p, err)
+		}
+	}
+
+	item := &clip_helper.ClipboardItem{
+		Type:  clip_helper.ClipboardFile,
+		Files: paths,
+		Text:  fmt.Sprintf("%d files selected", len(paths)),
+	}
+
+	a.cacheClipboardItem(item)
+	return true, nil
+}
+
+// GetClipboardType returns the type of current clipboard content without reading the full content
+func (a *App) GetClipboardType() (string, error) {
+	item, err := clip_helper.ReadClipboard()
+	if err != nil {
+		return "", err
+	}
+	return string(item.Type), nil
+}
+
+// decodeBase64 decodes a base64 string
+func decodeBase64(s string) ([]byte, error) {
+	return base64.StdEncoding.DecodeString(s)
 }

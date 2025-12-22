@@ -16,7 +16,7 @@ var assets embed.FS
 
 func main() {
 	// Parse command line flags
-	mode := flag.String("mode", "client", "Mode: 'host' for central-server host or 'client' for central-server client")
+	mode := flag.String("mode", "pending", "Mode: 'host' for central-server host, 'client' for client, omit to choose in UI")
 	flag.Parse()
 
 	// Create an instance of the app structure
@@ -39,10 +39,11 @@ func main() {
 		},
 		Windows: &windows.Options{
 			WebviewIsTransparent: true,
-			WindowIsTranslucent:  false,
-
+			WindowIsTranslucent:  true,
+			DisableFramelessWindowDecorations: true,
 		},
-		OnStartup: app.startup,
+		OnStartup:  app.startup,
+		OnShutdown: app.shutdown,
 		Bind: []interface{}{
 			app,
 		},

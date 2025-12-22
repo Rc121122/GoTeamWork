@@ -61,7 +61,22 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
 
     const onChatMsg = (msg: ChatMessage) => {
         if (msg.roomId === currentRoom.id) {
-            setMessages(prev => [...prev, msg]);
+            setMessages(prev => {
+                // Check if this is our own message that we already added locally
+                const existingIndex = prev.findIndex(m => 
+                    m.userId === msg.userId && 
+                    m.message === msg.message && 
+                    Math.abs(m.timestamp - msg.timestamp) < 10 // within 10 seconds
+                );
+                if (existingIndex !== -1) {
+                    // Replace the local message with the server message
+                    const newMessages = [...prev];
+                    newMessages[existingIndex] = msg;
+                    return newMessages;
+                } else {
+                    return [...prev, msg];
+                }
+            });
         }
     };
 
@@ -136,14 +151,24 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
+    const messageToSend = newMessage.trim();
     try {
       if (appMode === 'client') {
-        await httpSendChatMessage({ roomId: currentRoom.id, userId: currentUser.id, message: newMessage });
+        await httpSendChatMessage({ roomId: currentRoom.id, userId: currentUser.id, message: messageToSend });
       } else {
-        await hostSendChatMessage(currentRoom.id, currentUser.id, newMessage);
+        await hostSendChatMessage(currentRoom.id, currentUser.id, messageToSend);
       }
+      // Immediately add the message to local state
+      const sentMessage: ChatMessage = {
+        id: `sent_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        roomId: currentRoom.id,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        message: messageToSend,
+        timestamp: Date.now() / 1000,
+      };
+      setMessages(prev => [...prev, sentMessage]);
       setNewMessage('');
-      // refreshChat(); // No longer needed as we receive our own message via SSE
     } catch (err) {
       console.error(err);
     }
@@ -189,6 +214,19 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
           return null;
       }
 
+      const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+        event.dataTransfer.effectAllowed = 'copy';
+        if (item.type === 'text' && item.text) {
+          event.dataTransfer.setData('text/plain', item.text);
+        } else if (item.type === 'image' && item.text) {
+          // Fallback: share descriptive text for image
+          event.dataTransfer.setData('text/plain', '[Image] ' + item.text);
+        } else if (item.type === 'file') {
+          // Provide a hint to the drop target; real file transfer requires native integration
+          event.dataTransfer.setData('text/plain', 'Files ready to share');
+        }
+      };
+
       console.log("Rendering clipboard item:", item.type, item);
 
       const getTypeIcon = (type: string) => {
@@ -221,7 +259,7 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
         const downloadOpId = op.id || op.itemId;
 
         return (
-          <div key={op.id} className="clipboard-card" style={{
+          <div key={op.id} className="clipboard-card" draggable onDragStart={handleDragStart} style={{
               background: 'rgba(255, 255, 255, 0.05)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
               borderRadius: '12px',
@@ -485,7 +523,10 @@ const RoomView: React.FC<RoomProps> = ({ currentUser, currentRoom, onLeave, appM
           {messages.map(msg => (
             <div key={msg.id} className={`chat-bubble ${msg.userId === currentUser.id ? 'chat-bubble-me' : 'chat-bubble-other'}`}>
               {msg.userId === currentUser.id ? (
-                <div className="chat-message">{msg.message}</div>
+                <div>
+                  <div className="chat-sender" style={{ textAlign: 'right' }}>You</div>
+                  <div className="chat-message">{msg.message}</div>
+                </div>
               ) : (
                 <div>
                   <div className="chat-sender">{msg.userName}</div>

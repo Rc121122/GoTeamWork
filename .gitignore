@@ -4,3 +4,6 @@ frontend/dist
 *.exe
 GOproject
 .DS_Store
+docs/report2.md
+GoTeamWork.dmg
+test_build

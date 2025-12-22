@@ -13,91 +13,165 @@ A real-time collaborative clipboard sharing and chat application built with Go a
 - **REST API**: Comprehensive API for client-server communication
 - **LAN Discovery**: Automatic network scanning for host discovery
 - **Hotkey Integration**: Clipboard sharing triggered by customizable hotkeys
+- **Transparent HUD**: Floating gopher icon for clipboard sharing notifications
 
 ## Prerequisites
 
-- Go 1.25.2 or higher
-- Node.js and npm (for frontend)
-- Wails v2 CLI
+- **Go**: 1.25.2 or higher
+- **Node.js**: 18.x or higher (with npm)
+- **Wails CLI**: v2.10.2 or higher
+- **Git**: For cloning the repository
 
-### Installing Dependencies
+### Platform-Specific Requirements
+
+#### macOS
+- Xcode Command Line Tools
+- macOS 10.13 or higher
+
+#### Windows
+- Windows 10 or higher
+- WebView2 Runtime (automatically installed with Wails, or download from [Microsoft](https://developer.microsoft.com/microsoft-edge/webview2/))
+- GCC (MinGW-w64 recommended) for CGO compilation
+
+#### Linux
+- GTK3 development libraries
+- WebKitGTK development libraries
+
+## Installation
+
+### 1. Install Wails CLI (v2.10.2)
 
 #### macOS
 ```bash
+# Install Xcode Command Line Tools if not already installed
 xcode-select --install
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-```
 
-#### Linux
-```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
-
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
+# Install Wails CLI
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
 ```
 
 #### Windows
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-# Ensure WebView2 runtime is installed
+# Install Wails CLI
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+
+# Ensure WebView2 Runtime is installed (Wails will prompt if needed)
+# Download from: https://developer.microsoft.com/microsoft-edge/webview2/
 ```
 
-## Installation
-
-1. Clone the repository:
+#### Linux (Ubuntu/Debian)
 ```bash
-git clone https://github.com/yourusername/GoTeamWork.git
+# Install system dependencies
+sudo apt update
+sudo apt install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
+
+# Install Wails CLI
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+```
+
+### 2. Clone and Setup Project
+```bash
+# Clone the repository
+git clone https://github.com/Rc121122/GoTeamWork.git
 cd GoTeamWork
-```
 
-2. Install Go dependencies:
-```bash
+# Install Go dependencies
 go mod download
-```
 
-3. Install frontend dependencies:
-```bash
+# Install frontend dependencies
 cd frontend
 npm install
 cd ..
 ```
 
-4. Build the application:
+### 3. Build the Application
+
+#### Build for Current Platform
 ```bash
 wails build
 ```
 
+#### Build for Specific Platforms
+
+**macOS Intel:**
+```bash
+wails build -platform darwin/amd64
+```
+
+**macOS Apple Silicon:**
+```bash
+wails build -platform darwin/arm64
+```
+
+**Windows (64-bit):**
+```bash
+wails build -platform windows/amd64
+```
+
+**Linux (64-bit):**
+```bash
+wails build -platform linux/amd64
+```
+
+The built application will be in `build/bin/` directory.
+
 ## Usage
 
-### Running as Host (Server)
+### Running the Application
+
+By default (no flags), the app starts and prompts you to choose **Host** or **Client** in the UI. You can still force a mode via the `--mode` flag if you prefer CLI control.
+
+#### macOS
 ```bash
+# Host mode
 ./build/bin/GOproject.app/Contents/MacOS/GOproject --mode host
-```
 
-The host provides:
-- REST API server on port 8080
-- WebSocket connections for real-time updates
-- Clipboard sharing interface
-- Chat functionality
-
-### Running as Client
-```bash
+# Client mode
 ./build/bin/GOproject.app/Contents/MacOS/GOproject --mode client
+
+# Prompt for mode (default)
+./build/bin/GOproject.app/Contents/MacOS/GOproject
 ```
 
-Clients can:
-- Connect to host servers
-- Join rooms via invitations
-- Share clipboard content
-- Participate in group chat
+> Note: The app is not code-signed. On first launch, you may need to bypass Gatekeeper by right-clicking the app → Open (or System Settings → Privacy & Security → Open Anyway). If it was quarantined, clear the flag with `xattr -cr build/bin/GOproject.app`.
+
+#### Windows
+```bash
+# Host mode
+.\build\bin\GOproject.exe --mode host
+
+# Client mode
+.\build\bin\GOproject.exe --mode client
+
+# Prompt for mode (default)
+.\build\bin\GOproject.exe
+```
+
+#### Linux (Not Supported Yet)
+Linux builds are not yet available. Support for Linux will be added in a future release.
 
 ### Development Mode
 ```bash
+# Host mode
 wails dev --mode host
-# or
+
+# Client mode
 wails dev --mode client
 ```
+
+### Application Modes
+
+**Host Mode:**
+- Runs the central server
+- Provides REST API on port 8080
+- Manages WebSocket connections
+- Handles clipboard sharing and chat
+
+**Client Mode:**
+- Connects to host servers
+- Discovers hosts via LAN scanning
+- Joins rooms via invitations
+- Shares clipboard and participates in chat
 
 ## Project Structure
 
@@ -110,19 +184,14 @@ GoTeamWork/
 ├── handlers.go             # HTTP API handlers
 ├── sse.go                  # Server-Sent Events implementation
 ├── sanitize.go             # Input sanitization utilities
+├── clip.go                 # Clipboard operations
+├── clip_helper/            # Platform-specific clipboard helpers
 ├── auth_test.go            # Authentication tests
 ├── clipboard_test.go       # Clipboard functionality tests
-├── clip.go                 # Clipboard operations
-├── clip_hotkey_test.go     # Hotkey tests
 ├── handlers_test.go        # API handler tests
-├── history_hash_test.go    # History hash tests
-├── history_test.go         # History tests
-├── sanitize_test.go        # Sanitization tests
-├── sse_test.go             # SSE tests
-├── sse_routes_test.go      # SSE routes tests
 ├── go.mod                  # Go module file
 ├── wails.json              # Wails configuration
-├── frontend/               # Frontend application
+├── frontend/               # React frontend
 │   ├── index.html
 │   ├── package.json
 │   ├── tsconfig.json
@@ -130,27 +199,15 @@ GoTeamWork/
 │   └── src/
 │       ├── App.tsx
 │       ├── main.tsx
-│       ├── state.ts
-│       ├── client.ts
-│       ├── host.ts
-│       ├── sse.ts
-│       ├── api/
-│       │   ├── httpClient.ts
-│       │   └── types.ts
-│       └── components/
-│           ├── HostDashboard.tsx
-│           ├── HUD.tsx
-│           ├── LandingPage.tsx
-│           ├── Lobby.tsx
-│           ├── Modals.tsx
-│           ├── NewUserPage.tsx
-│           ├── Room.tsx
-│           ├── Sidebar.tsx
-│           └── TitleBar.tsx
+│       ├── components/
+│       │   ├── HUD.tsx          # Transparent floating HUD
+│       │   ├── HostDashboard.tsx
+│       │   └── ...
+│       └── api/
 ├── build/                  # Build output
 ├── docs/                   # Documentation
 ├── internal/               # Internal packages
-├── test_clip/              # Test utilities
+├── test_clip/              # Clipboard test utilities
 └── tests/                  # Test files
 ```
 
@@ -186,20 +243,33 @@ Modify `wails.json` for build settings and platform targets.
 go test ./...
 ```
 
-### Building for Different Platforms
+### Code Signing (macOS)
 ```bash
-# macOS Intel
-wails build -platform darwin/amd64
-
-# macOS Apple Silicon
-wails build -platform darwin/arm64
-
-# Windows
-wails build -platform windows/amd64
-
-# Linux
-wails build -platform linux/amd64
+codesign --force --deep --sign - GOproject.app
+#or
+xattr -crw GOproject.app
 ```
+
+### Troubleshooting
+
+#### Common Issues
+
+**Build fails on Windows:**
+- Ensure MinGW-w64 is installed and in PATH
+- Install WebView2 Runtime
+- Run as Administrator if permission issues occur
+
+**Transparent HUD not working:**
+- Ensure `WindowIsTranslucent: true` in `main.go` for Windows builds
+- Check that frontend CSS uses `background: transparent`
+
+**Network connectivity issues:**
+- Ensure firewall allows connections on port 8080
+- Check LAN discovery settings
+
+**Clipboard sharing not working:**
+- On macOS: Grant accessibility permissions
+- On Windows: Ensure proper clipboard permissions
 
 ## Security
 
@@ -215,10 +285,6 @@ wails build -platform linux/amd64
 3. Make your changes
 4. Add tests if applicable
 5. Submit a pull request
-
-## License
-
-[Add your license information here]
 
 ## Support
 

@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 	"GOproject/clip_helper"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/grandcat/zeroconf"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -34,6 +37,51 @@ const (
 type JWTClaims struct {
 	UserID string `json:"uid"`
 	jwt.RegisteredClaims
+}
+
+// initializeMode performs one-time setup for the chosen mode.
+func (a *App) initializeMode(mode string) error {
+	if mode != "host" && mode != "client" {
+		return fmt.Errorf("invalid mode: %s", mode)
+	}
+	if a.modeInitialized {
+		return nil
+	}
+
+	a.Mode = mode
+	a.modeInitialized = true
+
+	fmt.Printf("Starting in %s mode\n", a.Mode)
+
+	// Initialize with a default current user for host mode
+	if a.Mode == "host" {
+		a.currentUser = &User{
+			ID:       "host",
+			Name:     "Host Server",
+			IsOnline: true,
+		}
+
+		// Start HTTP server for central server functionality
+		a.StartHTTPServer("8080")
+
+		// Register zeroconf service for discovery
+		server, err := zeroconf.Register("GoTeamWork", "_http._tcp", "local.", 8080, []string{"version=1.0"}, nil)
+		if err != nil {
+			fmt.Printf("Failed to register zeroconf service: %v\n", err)
+		} else {
+			a.zeroconfServer = server
+			fmt.Println("Zeroconf service registered for discovery")
+		}
+
+		// Start cleanup goroutines for host mode
+		go a.startCleanupTasks(a.ctx)
+	} else if a.Mode == "client" {
+		// Initialize network client for client mode (URL will be set when user connects)
+		a.networkClient = NewNetworkClient("")
+		fmt.Println("Client mode initialized. Please enter server address to connect.")
+	}
+
+	return nil
 }
 
 // NewHistoryPool creates a new history pool
@@ -299,6 +347,7 @@ func (hp *HistoryPool) GetCurrentClipboardItems(roomID string) []*clip_helper.Cl
 type App struct {
 	ctx            context.Context
 	Mode           string
+	modeInitialized bool
 	users          map[string]*User
 	rooms          map[string]*Room
 	currentUser    *User
@@ -318,7 +367,16 @@ type App struct {
 	pendingClipboardItem  *clip_helper.ClipboardItem
 	pendingClipboardAt    time.Time
 
-	jwtSecret []byte
+	tempDir    string
+	useFastTar bool // Use high-performance tar library for large files
+
+	// Timing for performance measurement
+	shareStartTime        time.Time
+	totalBytesTransferred int64
+
+	jwtSecret      []byte
+	zeroconfServer *zeroconf.Server
+	httpServer     *http.Server
 }
 
 const (
@@ -329,16 +387,21 @@ const (
 // NewApp creates a new App application struct
 func NewApp(mode string) *App {
 	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
-	if secret == "" && mode == "host" {
+	if secret == "" {
 		if generated, err := generateJWTSecret(); err == nil {
 			secret = generated
-			fmt.Println("Generated ephemeral JWT secret for host mode; set JWT_SECRET to persist across restarts")
+			if mode == "host" {
+				fmt.Println("Generated ephemeral JWT secret for host mode; set JWT_SECRET to persist across restarts")
+			}
 		} else {
 			fmt.Printf("WARNING: failed to generate JWT secret, using insecure default: %v\n", err)
 			secret = "dev-insecure-change-me"
 		}
-	} else if secret == "" {
-		secret = "dev-insecure-change-me"
+	}
+
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "host" && mode != "client" {
+		mode = "pending"
 	}
 
 	app := &App{
@@ -349,20 +412,7 @@ func NewApp(mode string) *App {
 		historyPool:    NewHistoryPool(),
 		sseManager:     NewSSEManager(),
 		jwtSecret:      []byte(secret),
-	}
-
-	// Initialize with a default current user for host mode
-	// Note: host user is NOT added to users map, so it won't appear in user lists
-	if mode == "host" {
-		app.currentUser = &User{
-			ID:       "host",
-			Name:     "Host Server",
-			IsOnline: true,
-		}
-		// DO NOT add host to users map - host is not a regular user
-		// Host manages the server but doesn't participate in rooms
-	} else if mode == "client" {
-		// Client mode will set currentUser when user logs in
+		useFastTar:     os.Getenv("FAST_TAR") == "true", // Enable fast tar for large files
 	}
 
 	return app
@@ -372,28 +422,54 @@ func NewApp(mode string) *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	fmt.Printf("Starting in %s mode\n", a.Mode)
 
-	// Initialize test users only for host mode (but not the host itself)
-	if a.Mode == "host" {
-		a.CreateUser("Alice")
-		a.CreateUser("Bob")
-		a.CreateUser("Charlie")
-		fmt.Println("Initialized test users: Alice, Bob, Charlie")
+	// Create and clean temp directory for file storage
+	a.tempDir = filepath.Join(os.TempDir(), "GoTeamWork_temp")
+	os.RemoveAll(a.tempDir) // Clean previous temp files
+	if err := os.MkdirAll(a.tempDir, 0755); err != nil {
+		fmt.Printf("Failed to create temp dir: %v\n", err)
+		return
+	}
+	fmt.Printf("Temp directory created: %s\n", a.tempDir)
 
-		// Start HTTP server for central server functionality
-		a.StartHTTPServer("8080")
-
-		// Start cleanup goroutines for host mode
-		go a.startCleanupTasks(ctx)
-	} else if a.Mode == "client" {
-		// Initialize network client for client mode (URL will be set when user connects)
-		a.networkClient = NewNetworkClient("")
-		fmt.Println("Client mode initialized. Please enter server address to connect.")
+	if a.Mode == "host" || a.Mode == "client" {
+		if err := a.initializeMode(a.Mode); err != nil {
+			fmt.Printf("Failed to initialize mode %s: %v\n", a.Mode, err)
+		}
+	} else {
+		fmt.Println("Mode pending; waiting for user selection")
 	}
 
 	// Start clipboard monitoring for copy hotkey
 	a.StartClipboardMonitor()
+}
+
+// shutdown is called when the app shuts down
+func (a *App) shutdown(ctx context.Context) {
+	fmt.Println("Shutting down GoTeamWork...")
+
+	// Clean up temp files
+	if a.tempDir != "" {
+		if err := os.RemoveAll(a.tempDir); err != nil {
+			fmt.Printf("Failed to clean temp dir on shutdown: %v\n", err)
+		} else {
+			fmt.Printf("Temp directory cleaned: %s\n", a.tempDir)
+		}
+	}
+
+	// Shutdown HTTP server if running
+	if a.httpServer != nil {
+		fmt.Println("Shutting down HTTP server...")
+		if err := a.httpServer.Shutdown(ctx); err != nil {
+			fmt.Printf("HTTP server shutdown error: %v\n", err)
+		}
+	}
+
+	// Shutdown zeroconf server if running
+	if a.zeroconfServer != nil {
+		fmt.Println("Shutting down zeroconf server...")
+		a.zeroconfServer.Shutdown()
+	}
 }
 
 // Greet returns a greeting for the given name
@@ -782,6 +858,25 @@ func (a *App) GetMode() string {
 	return a.Mode
 }
 
+// SetMode sets the application mode (host/client) once and initializes mode-specific services.
+func (a *App) SetMode(mode string) (string, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "host" && mode != "client" {
+		return a.Mode, fmt.Errorf("invalid mode: %s", mode)
+	}
+	if a.modeInitialized {
+		if a.Mode == mode {
+			return a.Mode, nil
+		}
+		return a.Mode, fmt.Errorf("mode already initialized as %s", a.Mode)
+	}
+
+	if err := a.initializeMode(mode); err != nil {
+		return a.Mode, err
+	}
+	return a.Mode, nil
+}
+
 // GetConnectionStatus returns whether the client is connected to the server
 func (a *App) GetConnectionStatus() bool {
 	if a.networkClient == nil {
@@ -1073,8 +1168,8 @@ func (a *App) SendChatMessage(roomID, userID, message string) string {
 
 	// Add operation and notify consumers about the delta (not the entire history)
 	a.historyPool.AddOperation(roomID, OpAdd, msg.ID, item, userID, userName)
-	// Broadcast to all members including the sender (pass empty string as excludeUserID)
-	a.sseManager.BroadcastToUsers(members, EventChatMessage, msg, "")
+	// Broadcast to all members except the sender
+	a.sseManager.BroadcastToUsers(members, EventChatMessage, msg, userID)
 
 	fmt.Printf("Chat message from %s in room %s: %s\n", userName, roomID, safeMessage)
 	return fmt.Sprintf("Message sent: %s", msg.ID)
@@ -1250,7 +1345,12 @@ func (a *App) StartHTTPServer(port string) {
 	http.HandleFunc("/api/sse", corsMiddleware(a.handleSSE))
 
 	fmt.Printf("Starting HTTP server on port %s\n", port)
-	go http.ListenAndServe(":"+port, nil)
+	listener, err := net.Listen("tcp4", "0.0.0.0:"+port)
+	if err != nil {
+		fmt.Printf("Failed to listen on port %s: %v\n", port, err)
+		return
+	}
+	go http.Serve(listener, nil)
 }
 
 // RequestJoinRoom handles a user requesting to join a room

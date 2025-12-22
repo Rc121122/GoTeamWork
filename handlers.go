@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,10 +26,6 @@ func (a *App) handleUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "GET" {
-		if _, err := a.authenticateRequest(r); err != nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
 		users := a.ListAllUsers()
 		json.NewEncoder(w).Encode(users)
 		return
@@ -624,7 +622,7 @@ func (a *App) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if itemData.IsSingleFile {
-		if len(itemData.SingleFileData) == 0 {
+		if itemData.SingleFilePath == "" {
 			http.Error(w, "No file data available", http.StatusNotFound)
 			return
 		}
@@ -637,23 +635,43 @@ func (a *App) handleDownload(w http.ResponseWriter, r *http.Request) {
 			mimeType = "application/octet-stream"
 		}
 
+		file, err := os.Open(itemData.SingleFilePath)
+		if err != nil {
+			http.Error(w, "Failed to open file", http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+
 		w.Header().Set("Content-Type", mimeType)
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(itemData.SingleFileData)))
-		w.Write(itemData.SingleFileData)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", itemData.SingleFileSize))
+		io.Copy(w, file)
 		return
 	}
 
-	if len(itemData.ZipData) == 0 {
+	if itemData.ArchiveFilePath == "" {
 		http.Error(w, "No file data available", http.StatusNotFound)
 		return
 	}
 
+	file, err := os.Open(itemData.ArchiveFilePath)
+	if err != nil {
+		http.Error(w, "Failed to open file", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		http.Error(w, "Failed to get file info", http.StatusInternalServerError)
+		return
+	}
+
 	// Set headers for file download
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"shared_files_%s.zip\"", opID))
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(itemData.ZipData)))
-	w.Write(itemData.ZipData)
+	w.Header().Set("Content-Type", "application/x-tar")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"shared_items_%s.tar\"", opID))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+	io.Copy(w, file)
 }
 
 // handleClipboardUpload handles POST /api/clipboard
@@ -756,26 +774,47 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 	fileThumb := r.Header.Get("X-Clipboard-File-Thumb")
 	fileSizeHeader := r.Header.Get("X-Clipboard-File-Size")
 
-	fmt.Printf("Received %s upload for op: %s\n", map[bool]string{true: "single file", false: "zip"}[isSingle], opID)
+	fmt.Printf("Received %s upload for op: %s\n", map[bool]string{true: "single file", false: "archive"}[isSingle], opID)
 
-	// Limit payload size to 10GB
-	const maxDataSize = 10 * 1024 * 1024 * 1024            // 10GB
-	limitedReader := io.LimitReader(r.Body, maxDataSize+1) // +1 to detect if over limit
+	// Limit payload size to 100GB and stream to disk to avoid memory blowup
+	const maxDataSize = 100 * 1024 * 1024 * 1024 // 100GB
+	limitedReader := io.LimitReader(r.Body, maxDataSize+1)
 
-	zipData, err := io.ReadAll(limitedReader)
+	var destPath string
+	if isSingle {
+		if fileName == "" {
+			fileName = fmt.Sprintf("shared_file_%s", opID)
+		}
+		destPath = filepath.Join(a.tempDir, opID+"_"+fileName)
+	} else {
+		destPath = filepath.Join(a.tempDir, opID+".tar")
+	}
+
+	destFile, err := os.Create(destPath)
 	if err != nil {
-		fmt.Printf("Failed to read zip body: %v\n", err)
-		http.Error(w, "Failed to read body", http.StatusInternalServerError)
+		fmt.Printf("Failed to create dest file: %v\n", err)
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return
 	}
 
-	if len(zipData) > maxDataSize {
-		fmt.Printf("Upload size %d bytes exceeds limit of %d bytes\n", len(zipData), maxDataSize)
-		http.Error(w, "File too large (max 10GB)", http.StatusRequestEntityTooLarge)
+	nWritten, err := io.Copy(destFile, limitedReader)
+	if cerr := destFile.Close(); cerr != nil {
+		fmt.Printf("Failed to close dest file: %v\n", cerr)
+	}
+	if err != nil {
+		fmt.Printf("Failed to write body to disk: %v\n", err)
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Printf("Zip data size: %d bytes\n", len(zipData))
+	if nWritten > maxDataSize {
+		fmt.Printf("Upload size %d bytes exceeds limit of %d bytes\n", nWritten, maxDataSize)
+		os.Remove(destPath)
+		http.Error(w, "File too large (max 100GB)", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	fmt.Printf("Zip data size: %d bytes\n", nWritten)
 
 	// Update item in history pool
 	// Find operation in any room
@@ -827,15 +866,13 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 
 	a.mu.Lock()
 	if isSingle {
-		if fileName == "" {
-			fileName = fmt.Sprintf("shared_file_%s", opID)
-		}
 		if fileMime == "" {
 			fileMime = "application/octet-stream"
 		}
 		itemData.IsSingleFile = true
 		itemData.SingleFileName = fileName
 		itemData.SingleFileMime = fileMime
+		itemData.SingleFilePath = destPath
 		if fileThumb != "" {
 			itemData.SingleFileThumb = fileThumb
 		}
@@ -843,23 +880,21 @@ func (a *App) handleZipUpload(w http.ResponseWriter, r *http.Request) {
 			if parsed, err := strconv.ParseInt(fileSizeHeader, 10, 64); err == nil {
 				itemData.SingleFileSize = parsed
 			} else {
-				itemData.SingleFileSize = int64(len(zipData))
+				itemData.SingleFileSize = nWritten
 			}
 		} else {
-			itemData.SingleFileSize = int64(len(zipData))
+			itemData.SingleFileSize = nWritten
 		}
-		itemData.SingleFileData = zipData
 		itemData.ZipData = nil
 		itemData.Text = fmt.Sprintf("%s (%s) ready", fileName, clip_helper.HumanFileSize(itemData.SingleFileSize))
 	} else {
-		itemData.ZipData = zipData
+		itemData.ArchiveFilePath = destPath
 		itemData.IsSingleFile = false
-		itemData.SingleFileData = nil
-		itemData.Text = fmt.Sprintf("%d files compressed (ready)", len(itemData.Files))
+		itemData.Text = fmt.Sprintf("%d items archived (ready)", len(itemData.Files))
 	}
 	a.mu.Unlock()
 
-	fmt.Printf("Updated operation %s with zip data. Text: %s\n", opID, itemData.Text)
+	fmt.Printf("Updated operation %s with archive data. Text: %s\n", opID, itemData.Text)
 
 	// Broadcast to room members
 	if roomID != "" {

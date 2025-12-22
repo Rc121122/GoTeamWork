@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -220,9 +221,19 @@ func (n *NetworkClient) UploadClipboardItem(item *clip_helper.ClipboardItem, use
 	return &op, nil
 }
 
-// UploadZipData uploads zip data for a specific operation
+// UploadZipData uploads archive data for a specific operation (tar format)
 func (n *NetworkClient) UploadZipData(opID string, zipData []byte) error {
-	return n.uploadFileData(opID, zipData, false, nil)
+	return n.uploadFileData(opID, bytes.NewReader(zipData), false, nil)
+}
+
+// UploadZipFile uploads archive file from disk for a specific operation
+func (n *NetworkClient) UploadZipFile(opID, filePath string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open zip file: %w", err)
+	}
+	defer file.Close()
+	return n.uploadFileData(opID, file, false, nil)
 }
 
 // UploadSingleFileData uploads a raw file instead of a zip for single-file shares
@@ -235,16 +246,34 @@ func (n *NetworkClient) UploadSingleFileData(opID string, fileData []byte, name,
 	if thumb != "" {
 		meta["X-Clipboard-File-Thumb"] = thumb
 	}
-	return n.uploadFileData(opID, fileData, true, meta)
+	return n.uploadFileData(opID, bytes.NewReader(fileData), true, meta)
 }
 
-func (n *NetworkClient) uploadFileData(opID string, data []byte, single bool, headers map[string]string) error {
+// UploadSingleFile uploads a single file from disk
+func (n *NetworkClient) UploadSingleFile(opID, filePath, name, mime string, size int64, thumb string) error {
+	meta := map[string]string{
+		"X-Clipboard-File-Name": name,
+		"X-Clipboard-File-Mime": mime,
+		"X-Clipboard-File-Size": strconv.FormatInt(size, 10),
+	}
+	if thumb != "" {
+		meta["X-Clipboard-File-Thumb"] = thumb
+	}
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+	return n.uploadFileData(opID, file, true, meta)
+}
+
+func (n *NetworkClient) uploadFileData(opID string, data io.Reader, single bool, headers map[string]string) error {
 	endpoint := fmt.Sprintf("%s/api/clipboard/%s/zip", n.serverURL, opID)
 	if single {
 		endpoint += "?single=1"
 	}
 
-	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(data))
+	req, err := http.NewRequest("POST", endpoint, data)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -259,7 +288,7 @@ func (n *NetworkClient) uploadFileData(opID string, data []byte, single bool, he
 		}
 		req.Header.Set("Content-Type", contentType)
 	} else {
-		req.Header.Set("Content-Type", "application/zip")
+		req.Header.Set("Content-Type", "application/x-tar")
 	}
 
 	for k, v := range headers {

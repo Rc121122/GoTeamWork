@@ -46,6 +46,9 @@ func addFileToZip(zipWriter *zip.Writer, filename string) error {
 		// Use forward slashes for zip paths
 		header.Name = filepath.ToSlash(relPath)
 
+		// Set UTF-8 flag for proper encoding of non-ASCII filenames
+		header.Flags |= 0x800
+
 		if info.IsDir() {
 			header.Name += "/"
 		} else {

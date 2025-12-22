@@ -18,7 +18,7 @@ type ClipboardItem struct {
 	Type    ClipboardItemType `json:"type"`
 	Text    string            `json:"text,omitempty"`
 	Image   []byte            `json:"image,omitempty"` // PNG encoded
-	ZipData []byte            `json:"-"`               // Zip file content
+	ZipData []byte            `json:"-"`               // Legacy zip content (kept for backward compatibility)
 	Files   []string          `json:"files,omitempty"` // File paths
 
 	IsSingleFile    bool   `json:"isSingleFile,omitempty"`
@@ -27,6 +27,9 @@ type ClipboardItem struct {
 	SingleFileSize  int64  `json:"singleFileSize,omitempty"`
 	SingleFileThumb string `json:"singleFileThumb,omitempty"`
 	SingleFileData  []byte `json:"-"` // raw bytes for direct download
+
+	ArchiveFilePath string `json:"-"` // Path to tar archive on disk
+	SingleFilePath  string `json:"-"` // Path to single file on disk
 }
 
 const (

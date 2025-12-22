@@ -19,7 +19,6 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
           </div>
           <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
             <button className="primary-btn" onClick={onStart}>Start</button>
-            <button className="secondary-btn" onClick={onStart}>Join a room</button>
           </div>
         </div>
         <div className="card-section" style={{ alignSelf: 'stretch' }}>

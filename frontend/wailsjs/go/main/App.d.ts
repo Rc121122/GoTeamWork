@@ -17,6 +17,8 @@ export function GetChatHistory(arg1:string):Promise<Array<main.ChatMessage>>;
 
 export function GetClipboardItem():Promise<clip_helper.ClipboardItem>;
 
+export function GetClipboardType():Promise<string>;
+
 export function GetConnectionStatus():Promise<boolean>;
 
 export function GetCurrentRoom():Promise<main.Room>;
@@ -39,7 +41,13 @@ export function ListAllUsers():Promise<Array<main.User>>;
 
 export function RequestJoinRoom(arg1:string,arg2:string):Promise<string>;
 
+export function SaveDroppedFiles(arg1:Array<main.DroppedFilePayload>):Promise<Array<string>>;
+
 export function SendChatMessage(arg1:string,arg2:string,arg3:string):Promise<string>;
+
+export function SetMode(arg1:string):Promise<string>;
+
+export function SetPendingClipboardFiles(arg1:Array<string>):Promise<boolean>;
 
 export function SetServerURL(arg1:string):Promise<void>;
 

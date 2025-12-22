@@ -110,4 +110,4 @@ export interface Operation {
   userName?: string;
 }
 
-export type AppMode = "host" | "client";
+export type AppMode = "host" | "client" | "pending";

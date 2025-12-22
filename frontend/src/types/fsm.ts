@@ -1,5 +1,6 @@
 export type AppState = 
   | 'LOADING'
+  | 'MODE_SELECT'
   | 'LANDING'
   | 'NEW_USER'
   | 'LOBBY'
