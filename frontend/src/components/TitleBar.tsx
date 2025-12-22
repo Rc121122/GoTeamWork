@@ -2,29 +2,42 @@ import React from 'react';
 import { WindowMinimise, WindowToggleMaximise, Quit } from '../../wailsjs/runtime/runtime';
 
 const TitleBar: React.FC = () => {
+  const isMac = typeof navigator !== 'undefined' && navigator.userAgent.toLowerCase().includes('mac');
+
   return (
-    <div className="title-bar">
-      <div style={{ color: '#ecf0f1', fontSize: '14px', fontWeight: 'bold' }}>GoTeamWork</div>
-      <div className="title-bar-controls">
-        <button 
-          onClick={WindowMinimise}
-          style={{ background: 'transparent', border: 'none', color: '#bdc3c7', cursor: 'pointer', marginBottom: '2px' }}
-        >
-          _
-        </button>
-        <button 
-          onClick={WindowToggleMaximise}
-          style={{ background: 'transparent', border: 'none', color: '#bdc3c7', cursor: 'pointer', marginTop: '2px'}}
-        >
-          □
-        </button>
-        <button 
-          onClick={Quit}
-          style={{ background: 'transparent', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: '1.2em' }}
-        >
-          ✕
-        </button>
-      </div>
+    <div className={`title-bar ${isMac ? 'title-bar-mac' : ''}`}>
+      {isMac ? (
+        <div className="mac-header" style={{ WebkitAppRegion: 'no-drag', '--wails-draggable': 'no-drag' } as React.CSSProperties}>
+          <span className="red" onClick={Quit} />
+          <span className="yellow" onClick={WindowMinimise} />
+          <span className="green" onClick={WindowToggleMaximise} />
+          <div className="mac-title">GoTeamWork</div>
+        </div>
+      ) : (
+        <>
+          <div className="title-text">GoTeamWork</div>
+          <div className="title-bar-controls">
+            <button 
+              onClick={WindowMinimise}
+              className="title-btn"
+            >
+              _
+            </button>
+            <button 
+              onClick={WindowToggleMaximise}
+              className="title-btn"
+            >
+              □
+            </button>
+            <button 
+              onClick={Quit}
+              className="title-btn close"
+            >
+              ✕
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 };

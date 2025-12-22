@@ -44,24 +44,27 @@ const HUD: React.FC<HUDProps> = ({ onClose }) => {
   };
 
   return (
-    <div style={{ 
-      position: 'fixed',
-      inset: 0,
-      width: '100%', 
-      height: '100%', 
-      display: 'flex', 
-      justifyContent: 'center', 
-      alignItems: 'center', 
-      pointerEvents: 'auto',
-      background: 'transparent',
-      zIndex: 9999,
-      // WebkitAppRegion: 'drag', // Allow dragging
-    }}>
+    <div 
+      onMouseDown={onClose}
+      style={{ 
+        position: 'fixed',
+        inset: 0,
+        width: '100%', 
+        height: '100%', 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        pointerEvents: 'auto',
+        background: 'transparent',
+        zIndex: 9999,
+        // WebkitAppRegion: 'drag', // Allow dragging
+      }}>
       <img 
-      src={state === 'idle' ? gopherIdle : gopherCarry} 
-      alt="Gopher" 
-      style={{ width: '40px', cursor: 'pointer', marginLeft: '100px', WebkitAppRegion: 'no-drag', opacity: 0.9 } as React.CSSProperties} 
-      onClick={handleClick}
+        src={state === 'idle' ? gopherIdle : gopherCarry} 
+        alt="Gopher" 
+        style={{ width: '40px', cursor: 'pointer', marginLeft: '100px', WebkitAppRegion: 'no-drag', opacity: 0.9 } as React.CSSProperties} 
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={handleClick}
       />
     </div>
   );

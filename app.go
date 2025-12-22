@@ -321,8 +321,8 @@ type App struct {
 	pendingClipboardItem  *clip_helper.ClipboardItem
 	pendingClipboardAt    time.Time
 
-	tempDir               string
-	useFastTar            bool // Use high-performance tar library for large files
+	tempDir    string
+	useFastTar bool // Use high-performance tar library for large files
 
 	// Timing for performance measurement
 	shareStartTime        time.Time
@@ -397,13 +397,8 @@ func (a *App) startup(ctx context.Context) {
 
 	fmt.Printf("Starting in %s mode\n", a.Mode)
 
-	// Initialize test users only for host mode (but not the host itself)
+	// Host startup tasks
 	if a.Mode == "host" {
-		a.CreateUser("Alice")
-		a.CreateUser("Bob")
-		a.CreateUser("Charlie")
-		fmt.Println("Initialized test users: Alice, Bob, Charlie")
-
 		// Start HTTP server for central server functionality
 		a.StartHTTPServer("8080")
 
